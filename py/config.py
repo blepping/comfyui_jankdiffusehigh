@@ -30,7 +30,6 @@ class Config:
         "guidance_restart_s_noise",
         "guidance_restart",
         "guidance_steps",
-        "iteration_override",
         "reference_wavelet_multiplier",
         "renoise_factor",
         "resample_mode",
@@ -41,6 +40,7 @@ class Config:
         "sharpen_mode",
         "sharpen_reference",
         "sharpen_strength",
+        "skip_callback",
         "sigma_offset",
         "vae_decode_kwargs",
         "vae_encode_kwargs",
@@ -96,6 +96,7 @@ class Config:
         sharpen_mode="gaussian",
         sharpen_reference=True,
         sharpen_strength=1.0,
+        skip_callback=False,
         sigma_offset=0,
         upscale_model=None,
         vae_decode_kwargs=None,
@@ -109,6 +110,7 @@ class Config:
             default_is_fun=True,
         )
         self.sigma_offset = sigma_offset
+        self.skip_callback = skip_callback
         self.fadeout_factor = fadeout_factor
         self.scale_factor = scale_factor
         self.guidance_factor = guidance_factor
@@ -175,9 +177,6 @@ class Config:
             return
         if not isinstance(iteration_override, dict):
             raise TypeError("Iteration override must be an object")
-        # if isinstance(next(iter(iteration_override.values())), self.__class__):
-        #     self.iteration_Override = iteration_override
-        #     return
         selfdict = self.as_dict()
         overrides = self.iteration_override
         for k, v in iteration_override.items():

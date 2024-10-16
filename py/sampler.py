@@ -55,20 +55,6 @@ class DiffuseHighSampler:
     def __getattr__(self, key):
         return getattr(self.config, key)
 
-    def call_model(self, x, sigma):
-        return self.model(x, sigma * self.s_in, **self.extra_args)
-
-    def do_callback(self, idx, x, sigma, denoised):
-        if self.callback is None:
-            return
-        self.callback({
-            "i": idx,
-            "x": x,
-            "sigma": sigma,
-            "sigma_hat": sigma,
-            "denoised": denoised,
-        })
-
     def apply_guidance(self, idx, denoised):
         if self.guidance_waves is None or idx >= self.guidance_steps:
             return denoised
@@ -79,7 +65,7 @@ class DiffuseHighSampler:
         if mix_scale == 0:
             return denoised
         if self.guidance_mode not in {"image", "latent"}:
-            raise ValueError("ohno")
+            raise ValueError("Bad guidance mode")
         if self.guidance_mode == "image":
             dn_img = (
                 self.vae.decode(denoised, disable_pbar=self.disable_pbar)
@@ -191,7 +177,7 @@ class DiffuseHighSampler:
             fallback(model, self.model),
             x,
             sigmas,
-            callback=self.callback,
+            callback=self.callback if not self.skip_callback else None,
             extra_args=self.extra_args.copy(),
             disable=disable_pbar or self.disable_pbar,
             **sampler.extra_options,
@@ -219,6 +205,10 @@ class DiffuseHighSampler:
             desc="DiffuseHigh iteration",
         ):
             self.config = self.base_config.get_iteration_config(iteration)
+            if self.config.sigma_offset >= len(self.highres_sigmas) - 1:
+                raise ValueError(
+                    "Bad sigma_offset: posts to sigma past penultimate sigma",
+                )
             with tqdm(disable=self.disable_pbar, total=1, desc="upscale") as pbar:
                 img_hr = self.upscale(
                     self.reference_image,
@@ -243,9 +233,12 @@ class DiffuseHighSampler:
                         self.reference_wavelet_multiplier,
                     )
             else:
-                raise ValueError("ohno")
+                raise ValueError("Bad guidance_mode")
             x_noise = torch.randn_like(x_new)
-            x_new = x_new + x_noise * (self.highres_sigmas[0] * self.renoise_factor)
+            x_new = x_new + x_noise * (
+                self.highres_sigmas[self.sigma_offset] * self.renoise_factor
+            )
+            del x_noise
             # x_new = self.model.inner_model.inner_model.model_sampling.noise_scaling(
             #     self.highres_sigmas[0] * self.renoise_factor,
             #     x_noise,
