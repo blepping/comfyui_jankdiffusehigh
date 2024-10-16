@@ -1,0 +1,5 @@
+comfyui_jankdiffusehigh
+
+Copyright https://gitub.com/blepping
+
+This project was referenced from the original implementation at https://github.com/yhyun225/DiffuseHigh

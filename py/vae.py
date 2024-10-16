@@ -5,8 +5,10 @@ from enum import Enum, auto
 import folder_paths
 import torch
 from comfy.taesd.taesd import TAESD
+from tqdm import tqdm
 
 from .external import EXTERNAL
+from .utils import fallback
 
 tiled_diffusion = EXTERNAL.get("tiled_diffusion")
 
@@ -27,8 +29,8 @@ class VAEHelper:
         device=None,
         dtype=None,
         vae=None,
-        vae_encode_kwargs=None,
-        vae_decode_kwargs=None,
+        encode_kwargs=None,
+        decode_kwargs=None,
     ):
         if isinstance(mode, str):
             mode = VAEMode.__members__[mode.upper()]
@@ -63,8 +65,8 @@ class VAEHelper:
         self.device = device
         self.dtype = dtype
         self.vae = vae
-        self.vae_encode_kwargs = {} if vae_encode_kwargs is None else vae_encode_kwargs
-        self.vae_decode_kwargs = {} if vae_decode_kwargs is None else vae_decode_kwargs
+        self.encode_kwargs = fallback(encode_kwargs, {})
+        self.decode_kwargs = fallback(decode_kwargs, {})
         vae_handlers = {
             VAEMode.TAESD: (self.encode_taesd, self.decode_taesd),
             VAEMode.NORMAL: (self.encode_vae, self.decode_vae),
@@ -79,22 +81,27 @@ class VAEHelper:
         }
         self.encode_fun, self.decode_fun = vae_handlers[mode]
 
-    def encode(self, imgbatch, *, fix_dims=False):
+    def encode(self, imgbatch, *, fix_dims=False, disable_pbar=None):
         if fix_dims:
             imgbatch = imgbatch.moveaxis(1, -1)
         # print("ENCODING", imgbatch.min(), imgbatch.max())
-        result = self.encode_fun(imgbatch[..., :3])
+        with tqdm(disable=disable_pbar, total=1, desc="VAE encode") as pbar:
+            result = self.encode_fun(imgbatch[..., :3])
+            pbar.update()
         if self.mode != VAEMode.TAESD:
             # print("ENCODED(raw):", result.min(), result.max())
             result = self.latent_format.process_in(result)
         # print("ENCODED", result.shape, result.min(), result.max())
         return result
 
-    def decode(self, latent, *, skip_process_out=False):
+    def decode(self, latent, *, skip_process_out=False, disable_pbar=None):
         if self.mode != VAEMode.TAESD and not skip_process_out:
             latent = self.latent_format.process_out(latent)
         # print("DECODING", latent.min(), latent.max())
-        return self.decode_fun(latent)
+        with tqdm(disable=disable_pbar, total=1, desc="VAE decode") as pbar:
+            result = self.decode_fun(latent)
+            pbar.update()
+        return result
         # print("DECODED", result.shape, result.min(), result.max())
 
     def encode_taesd(self, imgbatch):
@@ -106,19 +113,19 @@ class VAEHelper:
 
     def encode_vae(self, imgbatch):
         # print("VAE ENC", imgbatch.shape)
-        return self.vae.encode(imgbatch, **self.vae_encode_kwargs)
+        return self.vae.encode(imgbatch, **self.encode_kwargs)
 
     def decode_vae(self, latent):
-        return self.vae.decode(latent, **self.vae_decode_kwargs)
+        return self.vae.decode(latent, **self.decode_kwargs)
 
     def encode_vae_tiled(self, imgbatch):
-        return self.vae.encode_tiled(imgbatch, **self.vae_encode_kwargs)
+        return self.vae.encode_tiled(imgbatch, **self.encode_kwargs)
 
     def decode_vae_tiled(self, latent):
-        return self.vae.decode_tiled(latent, **self.vae_decode_kwargs)
+        return self.vae.decode_tiled(latent, **self.decode_kwargs)
 
     def encode_vae_tiled_diffusion(self, imgbatch):
-        kwargs = self.td_encode_default_kwargs | self.vae_encode_kwargs
+        kwargs = self.td_encode_default_kwargs | self.encode_kwargs
         return tiled_diffusion.tiled_vae.VAEEncodeTiled_TiledDiffusion().process(
             pixels=imgbatch,
             vae=self.vae,
@@ -126,7 +133,7 @@ class VAEHelper:
         )[0]["samples"]
 
     def decode_vae_tiled_diffusion(self, latent):
-        kwargs = self.td_decode_default_kwargs | self.vae_decode_kwargs
+        kwargs = self.td_decode_default_kwargs | self.decode_kwargs
         return tiled_diffusion.tiled_vae.VAEDecodeTiled_TiledDiffusion().process(
             samples={"samples": latent},
             vae=self.vae,
