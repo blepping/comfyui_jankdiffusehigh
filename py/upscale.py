@@ -49,9 +49,9 @@ class Upscale:
         # tqdm.write(
         #     f"** PIL upscale {imgbatch.shape[2]}x{imgbatch.shape[1]} -> {target_width}x{target_height}",
         # )
-        if pbar is not None:
+        if pbar is not None and self.upscale_model is None:
             pbar.set_description(
-                f"upscale: {imgbatch.shape[2]}x{imgbatch.shape[1]} -> {target_width}x{target_height}",
+                f"upscale (simple): {imgbatch.shape[2]}x{imgbatch.shape[1]} -> {target_width}x{target_height}",
             )
         return pilimgbatch_to_torch(
             tuple(
