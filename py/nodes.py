@@ -20,12 +20,6 @@ class DiffuseHighSamplerNode:
     def INPUT_TYPES(cls) -> dict:
         return {
             "required": {
-                "highres_sigmas": (
-                    "SIGMAS",
-                    {
-                        "tooltip": "Sigmas used for steps after upscaling. Generally should be around 0.3-0.5 denoise. NOTE: I do not recommend plugging in raw 1.0 denoise sigmas here.",
-                    },
-                ),
                 "guidance_steps": (
                     "INT",
                     {
@@ -91,6 +85,12 @@ class DiffuseHighSamplerNode:
                 ),
             },
             "optional": {
+                "highres_sigmas": (
+                    "SIGMAS",
+                    {
+                        "tooltip": "Sigmas used for steps after upscaling. Generally should be around 0.3-0.5 denoise. NOTE: I do not recommend plugging in raw 1.0 denoise sigmas here.",
+                    },
+                ),
                 "sampler": (
                     "SAMPLER",
                     {

@@ -1,11 +1,11 @@
 from comfy_extras.nodes_upscale_model import ImageUpscaleWithModel
 from PIL import Image
 
-from .utils import (
+from .tensor_image_ops import (
     pilimgbatch_to_torch,
-    scale_dim,
     torch_to_pilimgbatch,
 )
+from .utils import scale_dim
 
 
 class Upscale:
@@ -20,7 +20,7 @@ class Upscale:
         self.rescale_increment = scale_dim(max(8, rescale_increment), increment=8)
         self.upscale_model = upscale_model
 
-    def __call__(self, imgbatch, scale_factor, *, pbar=None):
+    def __call__(self, imgbatch, scale_factor, *, pbar=None, use_upscale_model=True):
         if scale_factor == 1.0:
             return imgbatch
         _batch, height, width, _channels = imgbatch.shape
@@ -37,7 +37,7 @@ class Upscale:
         # tqdm.write(f">> UPSCALE: {width}x{height} -> {target_width}x{target_height}")
         if (target_height, target_width) == (height, width):
             return imgbatch
-        if self.upscale_model is not None:
+        if use_upscale_model and self.upscale_model is not None:
             if pbar is not None:
                 pbar.set_description(
                     f"upscale with model: {width}x{height} -> {target_width}x{target_height}",

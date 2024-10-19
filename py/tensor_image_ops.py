@@ -1,7 +1,12 @@
-from enum import Enum, auto
+from __future__ import annotations
 
+from enum import Enum, auto
+from typing import Sequence
+
+import numpy as np
 import torch
 import torchvision
+from PIL import Image as PILImage
 
 from .external import EXTERNAL
 
@@ -20,6 +25,27 @@ else:
 class SharpenMode(Enum):
     GAUSSIAN = auto()
     CONTRAST_ADAPTIVE = auto()
+
+
+def pilimgbatch_to_torch(
+    imgbatch: Sequence[PILImage, ...] | torch.Tensor,
+) -> torch.Tensor:
+    if isinstance(imgbatch, torch.Tensor):
+        return imgbatch
+    npi = np.stack(
+        tuple(np.array(i).astype(np.float32) / 255.0 for i in imgbatch),
+        axis=0,
+    )
+    return torch.from_numpy(npi)
+
+
+def torch_to_pilimgbatch(t: torch.Tensor) -> tuple[PILImage, ...]:
+    return tuple(
+        PILImage.fromarray(
+            np.clip((255.0 * i).cpu().numpy(), 0, 255).astype(np.uint8),
+        )
+        for i in t
+    )
 
 
 def scale_wavelets(waves, factor=1.0):
@@ -80,6 +106,7 @@ def gaussian_blur_image_sharpening(image, kernel_size=3, sigma=(0.1, 2.0), alpha
     return (alpha + 1) * image - alpha * image_blurred
 
 
+# Improvements added by https://github.com/Clybius
 # The following is modified to work with latent images of ~0 mean from https://github.com/Jamy-L/Pytorch-Contrast-Adaptive-Sharpening/tree/main.
 def contrast_adaptive_sharpening(x, amount=0.8, *, epsilon=1e-06):  # noqa: D417, PLR0914
     """Performs contrast adaptive sharpening on the batch of images x.

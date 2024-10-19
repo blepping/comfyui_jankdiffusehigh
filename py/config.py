@@ -24,6 +24,8 @@ class Config:
         "dwt_level",
         "dwt_mode",
         "dwt_wave",
+        "enable_cache_clearing",
+        "enable_gc",
         "fadeout_factor",
         "guidance_factor",
         "guidance_mode",
@@ -35,6 +37,7 @@ class Config:
         "resample_mode",
         "rescale_increment",
         "scale_factor",
+        "schedule_override",
         "sharpen_gaussian_kernel_size",
         "sharpen_gaussian_sigma",
         "sharpen_mode",
@@ -42,6 +45,7 @@ class Config:
         "sharpen_strength",
         "skip_callback",
         "sigma_offset",
+        "use_upscale_model",
         "vae_decode_kwargs",
         "vae_encode_kwargs",
         "vae_mode",
@@ -75,6 +79,8 @@ class Config:
         dwt_level=1,
         dwt_mode="symmetric",
         dwt_wave="db4",
+        enable_gc=True,
+        enable_cache_clearing=True,
         fadeout_factor=0.0,
         guidance_factor=1.0,
         guidance_mode="image",
@@ -91,6 +97,9 @@ class Config:
         rescale_increment=64,
         sampler=None,
         scale_factor=2.0,
+        schedule_override=None,
+        seed_rng=True,
+        seed_rng_offset=1,
         sharpen_gaussian_kernel_size=3,
         sharpen_gaussian_sigma=(0.1, 2.0),
         sharpen_mode="gaussian",
@@ -99,6 +108,7 @@ class Config:
         skip_callback=False,
         sigma_offset=0,
         upscale_model=None,
+        use_upscale_model=True,
         vae_decode_kwargs=None,
         vae_encode_kwargs=None,
         vae_mode="normal",
@@ -109,6 +119,8 @@ class Config:
             lambda: ksampler("euler"),
             default_is_fun=True,
         )
+        self.seed_rng = seed_rng
+        self.seed_rng_offset = seed_rng_offset
         self.sigma_offset = sigma_offset
         self.skip_callback = skip_callback
         self.fadeout_factor = fadeout_factor
@@ -143,6 +155,10 @@ class Config:
             rescale_increment=rescale_increment,
             upscale_model=upscale_model,
         )
+        if schedule_override is not None and not isinstance(schedule_override, dict):
+            raise TypeError("Bad type for schedule_override: must be null or object")
+        self.schedule_override = schedule_override
+        self.use_upscale_model = use_upscale_model
         self.dwt_mode = dwt_mode
         self.dwt_level = dwt_level
         self.dwt_wave = dwt_wave
@@ -172,6 +188,8 @@ class Config:
             raise ValueError("Bad blend_by_mode: must be one of image, latent, wavelet")
         self.blend_by_mode = blend_by_mode
         self.blend_function = BLENDING_MODES[blend_mode]
+        self.enable_gc = enable_gc
+        self.enable_cache_clearing = enable_cache_clearing
         self.iteration_override = {}
         if iteration_override is None or iteration_override == {}:
             return

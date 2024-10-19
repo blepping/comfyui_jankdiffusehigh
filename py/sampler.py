@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import gc
+import random
+from typing import Any
+
 import torch
 from tqdm import tqdm
 from tqdm.auto import trange
 
 from .config import Config
+from .schedule import Schedule
 from .tensor_image_ops import (
     blend_wavelets,
     scale_wavelets,
@@ -15,20 +20,20 @@ from .utils import ensure_model, fallback
 class DiffuseHighSampler:
     def __init__(
         self,
-        model,
-        initial_x,
-        sigmas,
+        model: object,
+        initial_x: torch.Tensor,
+        sigmas: torch.Tensor,
         *,
-        callback,
-        extra_args,
-        disable_pbar,
-        highres_sigmas,
-        guidance_sampler_opt=None,
-        reference_sampler_opt=None,
-        reference_image_opt=None,
-        vae_opt=None,
-        upscale_model_opt=None,
-        **kwargs: dict,
+        callback: None | callable,
+        extra_args: None | dict,
+        disable_pbar: None | bool,
+        highres_sigmas: None | torch.Tensor = None,
+        guidance_sampler_opt: None | object = None,
+        reference_sampler_opt: None | object = None,
+        reference_image_opt: None | object = None,
+        vae_opt: None | object = None,
+        upscale_model_opt: None | object = None,
+        **kwargs: dict[str, Any],
     ):
         self.s_in = initial_x.new_ones((initial_x.shape[0],))
         self.initial_x = initial_x
@@ -38,6 +43,7 @@ class DiffuseHighSampler:
         self.extra_args = fallback(extra_args, {})
         self.model = model
         self.latent_format = model.inner_model.inner_model.latent_format
+        self.model_sampling = model.inner_model.inner_model.model_sampling
         self.config = self.base_config = Config(
             initial_x.device,
             initial_x.dtype,
@@ -48,14 +54,45 @@ class DiffuseHighSampler:
             upscale_model=upscale_model_opt,
             **kwargs,
         )
-        self.highres_sigmas = highres_sigmas.detach().clone().to(sigmas)
-        self.reference_image = reference_image_opt
+        if highres_sigmas is not None:
+            self.highres_sigmas_input = highres_sigmas.detach().clone().to(sigmas)
+        else:
+            self.highres_sigmas_input = (
+                Schedule(
+                    self.model_sampling,
+                    self.latent_format,
+                    "karras",
+                    steps=50,
+                )
+                .sigmas[-16:]
+                .to(sigmas)
+            )
+        self.highres_sigmas: None | torch.FloatTensor = None
+        self.reference_image: None | torch.FloatTensor = reference_image_opt
         self.guidance_waves = None
+        if self.config.seed_rng:
+            seed = self.extra_args.get("seed")
+            if seed is not None:
+                torch.manual_seed(seed)
+                random.seed(seed)
+                for _ in range(self.config.seed_rng_offset):
+                    _ = random.random()  # noqa: S311
+                    _ = torch.randn_like(initial_x)
 
-    def __getattr__(self, key):
+    def __getattr__(self, key: str) -> Any:  # noqa: ANN401
         return getattr(self.config, key)
 
-    def apply_guidance(self, idx, denoised):
+    def gc(self) -> None:
+        if (
+            self.enable_cache_clearing
+            and hasattr(torch, "cuda")
+            and hasattr(torch.cuda, "empty_cache")
+        ):
+            torch.cuda.empty_cache()
+        if self.enable_gc:
+            gc.collect()
+
+    def apply_guidance(self, idx: int, denoised: torch.Tensor) -> torch.Tensor:
         if self.guidance_waves is None or idx >= self.guidance_steps:
             return denoised
         mix_scale = (
@@ -105,7 +142,6 @@ class DiffuseHighSampler:
                 fix_dims=True,
                 disable_pbar=self.disable_pbar,
             )
-        # tqdm.write(str(("GUIDE OUT", denoised.shape, result.shape, mix_scale)))
         if self.blend_by_mode != "latent":
             return result.to(denoised)
         return self.blend_function(
@@ -114,10 +150,40 @@ class DiffuseHighSampler:
             denoised.new_full((1,), mix_scale),
         )
 
-    def run_steps(self, *, x=None, sigmas=None):
-        x = self.initial_x if x is None else x
-        sigmas = self.sigmas if sigmas is None else sigmas
-        soffset = self.sigma_offset
+    def set_schedule(self) -> None:
+        if self.schedule_override is None:
+            self.highres_sigmas = self.highres_sigmas_input
+            return
+        self.highres_sigmas = Schedule(
+            self.model_sampling,
+            self.latent_format,
+            **self.schedule_override,
+        ).sigmas.to(self.highres_sigmas_input)
+
+    @classmethod
+    def add_restart_noise(
+        cls,
+        x: torch.Tensor,
+        sigma_min: float | torch.Tensor,
+        sigma_max: float | torch.Tensor,
+        *,
+        s_noise: float = 1.0,
+    ) -> torch.Tensor:
+        noise_factor = (sigma_max**2 - sigma_min**2) ** 0.5
+        return x + torch.randn_like(x).mul_(noise_factor * s_noise)
+
+    def run_steps(
+        self,
+        x: torch.Tensor,
+        *,
+        sigmas: None | torch.Tensor = None,
+    ) -> torch.Tensor:
+        sigmas = self.highres_sigmas if sigmas is None else sigmas
+        soffset = (
+            self.sigma_offset
+            if self.sigma_offset >= 0
+            else len(sigmas) + self.sigma_offset
+        )
         guidance_sigmas = sigmas[soffset : soffset + self.guidance_steps + 1]
         normal_sigmas = sigmas[soffset + self.guidance_steps :]
         step_idx = 0
@@ -143,11 +209,11 @@ class DiffuseHighSampler:
             desc="guidance steps iteration",
         ):
             if repidx > 0:
-                noise_factor = (
-                    guidance_sigmas[0] ** 2 - guidance_sigmas[-1] ** 2
-                ) ** 0.5
-                x = x + torch.randn_like(x) * (
-                    noise_factor * self.guidance_restart_s_noise
+                x = self.add_restart_noise(
+                    x,
+                    guidance_sigmas[-1],
+                    guidance_sigmas[0],
+                    s_noise=self.guidance_restart_s_noise,
                 )
             guidance_steps = len(guidance_sigmas) - 1
             for idx in trange(
@@ -171,7 +237,15 @@ class DiffuseHighSampler:
                 pbar.update()
         return x
 
-    def run_sampler(self, x, sigmas, *, model=None, sampler=None, disable_pbar=False):
+    def run_sampler(
+        self,
+        x: torch.Tensor,
+        sigmas: torch.Tensor,
+        *,
+        model: None | object = None,
+        sampler: None | object = None,
+        disable_pbar: bool = False,
+    ):
         sampler = fallback(sampler, self.sampler)
         return sampler.sampler_function(
             fallback(model, self.model),
@@ -183,7 +257,7 @@ class DiffuseHighSampler:
             **sampler.extra_options,
         )
 
-    def __call__(self):
+    def __call__(self) -> torch.Tensor:
         self.config = self.base_config.get_iteration_config("reference")
         if self.reference_image is None:
             with tqdm(disable=self.disable_pbar, desc="reference steps"):
@@ -198,21 +272,33 @@ class DiffuseHighSampler:
         elif self.iterations < 1:
             return self.vae.encode(self.reference_image, disable_pbar=self.disable_pbar)
         self.config = self.base_config
+        x_new = None
         for iteration in trange(
             self.iterations,
             disable=self.disable_pbar,
             initial=1,
             desc="DiffuseHigh iteration",
         ):
+            del x_new
             self.config = self.base_config.get_iteration_config(iteration)
+            self.set_schedule()
+            self.gc()
             if self.config.sigma_offset >= len(self.highres_sigmas) - 1:
                 raise ValueError(
-                    "Bad sigma_offset: posts to sigma past penultimate sigma",
+                    "Bad sigma_offset: points to sigma past penultimate sigma",
+                )
+            if self.config.sigma_offset < 0 and (
+                self.config_sigma_offset == -1
+                or abs(self.config.sigma_offset) >= len(self.highres_sigmas)
+            ):
+                raise ValueError(
+                    "Negative sigma_offset can't point to last sigma or to sigma less than index 0",
                 )
             with tqdm(disable=self.disable_pbar, total=1, desc="upscale") as pbar:
                 img_hr = self.upscale(
                     self.reference_image,
                     self.scale_factor,
+                    use_upscale_model=self.use_upscale_model,
                     pbar=pbar,
                 )
                 pbar.update()
@@ -226,7 +312,7 @@ class DiffuseHighSampler:
                     self.reference_image.clone().movedim(-1, 1).to(self.initial_x),
                 )
             elif self.guidance_mode == "latent":
-                self.guidance_waves = self.dwt(x_new.clone())
+                self.guidance_waves = self.dwt(x_new)
                 if self.reference_wavelet_multiplier != 1:
                     self.guidance_waves = scale_wavelets(
                         self.guidance_waves,
@@ -244,27 +330,28 @@ class DiffuseHighSampler:
             #     x_noise,
             #     x_new,
             # )
-            result = self.run_steps(x=x_new, sigmas=self.highres_sigmas)
+            self.gc()
+            x_new = self.run_steps(x_new, sigmas=self.highres_sigmas)
             if iteration == self.iterations - 1:
                 break
             self.reference_image = self.vae.decode(
-                result,
+                x_new,
                 disable_pbar=self.disable_pbar,
             )
-        return result
+        return x_new
 
 
 def diffusehigh_sampler(
-    model,
-    x,
-    sigmas,
+    model: object,
+    x: torch.Tensor,
+    sigmas: torch.Tensor,
     *,
-    diffusehigh_options,
-    disable=None,
-    extra_args=None,
-    callback=None,
-):
-    sampler = DiffuseHighSampler(
+    diffusehigh_options: dict[str, Any],
+    disable: None | bool = None,
+    extra_args: None | dict[str, Any] = None,
+    callback: None | callable = None,
+) -> torch.Tensor:
+    return DiffuseHighSampler(
         model,
         x,
         sigmas,
@@ -272,5 +359,4 @@ def diffusehigh_sampler(
         callback=callback,
         extra_args=extra_args,
         **diffusehigh_options,
-    )
-    return sampler()
+    )()
