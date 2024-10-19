@@ -17,6 +17,7 @@ See the [changelog](changelog.md) for recent user visible changes.
 * Progress and previews are pretty wonky (you can look at the log for some progress information).
 * Using VAE or upscale models may result in the main model getting repeatedly unloaded/reloaded. Try using `latent` as the `guidance_mode`. If you actually have enough VRAM, maybe disabling smart memory (via ComfyUI commandline parameter) would help.
 * Currently only tested on SD15 and SDXL, may not work with models like Flux. (Not much testing in general as of yet.)
+* Brownian noise-based (AKA SDE) samplers may be a bit weird here, there is a workaround in place but it might not be enough. Also don't use with prompt-control's PCSplitSampling stuff.
 
 ## Description
 

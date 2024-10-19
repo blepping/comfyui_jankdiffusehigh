@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import gc
 import random
+import sys
 from typing import Any
 
 import torch
@@ -70,14 +71,17 @@ class DiffuseHighSampler:
         self.highres_sigmas: None | torch.FloatTensor = None
         self.reference_image: None | torch.FloatTensor = reference_image_opt
         self.guidance_waves = None
+        self.seed_offset = 0
+        self.seed = self.extra_args.get("seed")
         if self.config.seed_rng:
-            seed = self.extra_args.get("seed")
+            seed = self.seed
             if seed is not None:
                 torch.manual_seed(seed)
                 random.seed(seed)
                 for _ in range(self.config.seed_rng_offset):
                     _ = random.random()  # noqa: S311
                     _ = torch.randn_like(initial_x)
+                    self.seed_offset += 1
 
     def __getattr__(self, key: str) -> Any:  # noqa: ANN401
         return getattr(self.config, key)
@@ -188,6 +192,7 @@ class DiffuseHighSampler:
         normal_sigmas = sigmas[soffset + self.guidance_steps :]
         step_idx = 0
         model = self.model
+        ensure_model(model)
 
         def model_wrapper(x, sigma, **extra_args: dict):
             nonlocal step_idx
@@ -215,27 +220,61 @@ class DiffuseHighSampler:
                     guidance_sigmas[0],
                     s_noise=self.guidance_restart_s_noise,
                 )
+                self.seed_offset += 1
             guidance_steps = len(guidance_sigmas) - 1
-            for idx in trange(
+            with trange(
                 guidance_steps,
                 initial=1,
                 disable=self.disable_pbar,
                 desc="guidance step",
-            ):
-                step_idx = idx
-                x = self.run_sampler(
-                    x,
-                    guidance_sigmas[idx : idx + 2],
-                    model=model_wrapper,
-                    sampler=self.guidance_sampler,
-                    disable_pbar=True,
-                )
+            ) as pbar:
+                for idx in pbar:
+                    step_idx = idx
+                    step_sigmas = guidance_sigmas[idx : idx + 2]
+                    if step_sigmas[-1] > step_sigmas[0]:
+                        raise ValueError(
+                            "Hit out-of-order sigma, likely due to restart sigmas in guidance step range",
+                        )
+                    pbar.set_description(
+                        f"guidance step {float(step_sigmas[0]):>2.03f} -> {float(step_sigmas[-1]):>2.03f}",
+                    )
+                    x = self.run_sampler(
+                        x,
+                        step_sigmas,
+                        model=model_wrapper,
+                        sampler=self.guidance_sampler,
+                        disable_pbar=True,
+                    )
+                    self.seed_offset += 1
         if len(normal_sigmas) > 1:
             ensure_model(model)
-            with tqdm(disable=self.disable_pbar, total=1, desc="normal steps") as pbar:
+            with tqdm(
+                disable=self.disable_pbar,
+                total=1,
+                desc=f"normal steps ({len(normal_sigmas) - 1}) {float(normal_sigmas[0]):>2.03f} ... {float(normal_sigmas[-1]):>2.03f}",
+            ) as pbar:
                 x = self.run_sampler(x, normal_sigmas)
                 pbar.update()
+                self.seed_offset += len(normal_sigmas) - 1
         return x
+
+    @classmethod
+    def unbork_brownian_noise(cls):
+        kds = sys.modules.get("comfy.k_diffusion.sampling")
+        if kds is None:
+            return
+        btns = getattr(kds, "BrownianTreeNoiseSampler", None)
+        if btns is None:
+            return
+        pc_reset = getattr(btns, "pc_reset", None)
+        if pc_reset is not None:
+            # Curse you, prompt-control!
+            pc_reset()
+
+    def get_extra_args(self):
+        if self.seed is None:
+            return self.extra_args.copy()
+        return self.extra_args | {"seed": self.seed + self.seed_offset}
 
     def run_sampler(
         self,
@@ -247,12 +286,13 @@ class DiffuseHighSampler:
         disable_pbar: bool = False,
     ):
         sampler = fallback(sampler, self.sampler)
+        self.unbork_brownian_noise()
         return sampler.sampler_function(
             fallback(model, self.model),
             x,
             sigmas,
             callback=self.callback if not self.skip_callback else None,
-            extra_args=self.extra_args.copy(),
+            extra_args=self.get_extra_args(),
             disable=disable_pbar or self.disable_pbar,
             **sampler.extra_options,
         )
@@ -260,12 +300,17 @@ class DiffuseHighSampler:
     def __call__(self) -> torch.Tensor:
         self.config = self.base_config.get_iteration_config("reference")
         if self.reference_image is None:
-            with tqdm(disable=self.disable_pbar, desc="reference steps"):
+            normal_step_count = len(self.sigmas) - 1
+            with tqdm(
+                disable=self.disable_pbar,
+                desc=f"normal steps ({normal_step_count}) {float(self.sigmas[0]):>2.03f} ... {float(self.sigmas[-1]):>2.03f}",
+            ):
                 x_lr = self.run_sampler(
                     self.initial_x,
                     self.sigmas,
                     sampler=self.reference_sampler,
                 )
+                self.seed_offset += normal_step_count
             if self.iterations < 1:
                 return x_lr
             self.reference_image = self.vae.decode(x_lr, disable_pbar=self.disable_pbar)
@@ -321,6 +366,7 @@ class DiffuseHighSampler:
             else:
                 raise ValueError("Bad guidance_mode")
             x_noise = torch.randn_like(x_new)
+            self.seed_offset += 1
             x_new = x_new + x_noise * (
                 self.highres_sigmas[self.sigma_offset] * self.renoise_factor
             )
