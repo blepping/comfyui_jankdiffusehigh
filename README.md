@@ -16,8 +16,9 @@ See the [changelog](changelog.md) for recent user visible changes.
 * There will be frequent workflow-breaking changes for a while yet.
 * Progress and previews are pretty wonky (you can look at the log for some progress information).
 * Using VAE or upscale models may result in the main model getting repeatedly unloaded/reloaded. Try using `latent` as the `guidance_mode`. If you actually have enough VRAM, maybe disabling smart memory (via ComfyUI commandline parameter) would help.
-* Currently only tested on SD15 and SDXL, may not work with models like Flux. (Not much testing in general as of yet.)
 * Brownian noise-based (AKA SDE) samplers may be a bit weird here, there is a workaround in place but it might not be enough. Also don't use with prompt-control's PCSplitSampling stuff.
+
+**Rectified Flow models note**: Should now work with RF models. SD3.5 apparently cannot handle high res images (even img2img) at all, so I don't recommend trying that. Flux seems to work pretty well. `image` guidance mode seems noticeably better than `latent` for Flux (based on my very limited testing) although it is slow. I haven't tested SD3.0 or other RF models, jank DiffuseHigh should handle them correctly but whether the results are actually decent I really couldn't say.
 
 ## Description
 
@@ -235,6 +236,7 @@ I tried to set the node defaults to align with the official implementation. Thes
 * It's very important that the initial reference is as close to flawless as possible. Unlike the normal highres fix approach which can sometimes fix issues when you set the denoise relatively high, DiffuseHigh guidance keeps the model from diverging from the reference too much. This can be a double edged sword in some cases.
 * The sampler has a workaround for a [long standing bug in ComfyUI](https://github.com/comfyanonymous/ComfyUI/issues/2833) where generations aren't deterministic when `add_noise` is disabled in the sampler. However, this may change seeds. You can disable the workaround via the advanced YAML options - see `seed_rng` and `seed_rng_offset`.
 * For `taesd` VAE mode, you will need the TAESD encoder models available at https://github.com/madebyollin/taesd - put them in `models/vae_approx`.
+* You can use DiffuseHigh as an enhanced highres-fix by passing a pre-upscaled reference image, setting the iteration count to one and using a scale factor of 1.0.
 
 ***
 

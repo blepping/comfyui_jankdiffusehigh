@@ -10,7 +10,12 @@ from tqdm import tqdm
 from .external import EXTERNAL
 from .utils import fallback
 
-tiled_diffusion = EXTERNAL.get("tiled_diffusion")
+tiled_diffusion = None
+
+
+def init_integrations():
+    global tiled_diffusion  # noqa: PLW0603
+    tiled_diffusion = EXTERNAL.get("tiled_diffusion")
 
 
 class VAEMode(Enum):
@@ -84,25 +89,20 @@ class VAEHelper:
     def encode(self, imgbatch, *, fix_dims=False, disable_pbar=None):
         if fix_dims:
             imgbatch = imgbatch.moveaxis(1, -1)
-        # print("ENCODING", imgbatch.min(), imgbatch.max())
         with tqdm(disable=disable_pbar, total=1, desc="VAE encode") as pbar:
             result = self.encode_fun(imgbatch[..., :3])
             pbar.update()
         if self.mode != VAEMode.TAESD:
-            # print("ENCODED(raw):", result.min(), result.max())
             result = self.latent_format.process_in(result)
-        # print("ENCODED", result.shape, result.min(), result.max())
         return result
 
     def decode(self, latent, *, skip_process_out=False, disable_pbar=None):
         if self.mode != VAEMode.TAESD and not skip_process_out:
             latent = self.latent_format.process_out(latent)
-        # print("DECODING", latent.min(), latent.max())
         with tqdm(disable=disable_pbar, total=1, desc="VAE decode") as pbar:
             result = self.decode_fun(latent)
             pbar.update()
         return result
-        # print("DECODED", result.shape, result.min(), result.max())
 
     def encode_taesd(self, imgbatch):
         dummy = torch.zeros((), device=self.device, dtype=self.dtype)
@@ -112,7 +112,6 @@ class VAEHelper:
         return OCSTAESD.decode(self.latent_format, latent)
 
     def encode_vae(self, imgbatch):
-        # print("VAE ENC", imgbatch.shape)
         return self.vae.encode(imgbatch, **self.encode_kwargs)
 
     def decode_vae(self, latent):

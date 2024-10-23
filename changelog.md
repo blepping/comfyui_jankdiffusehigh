@@ -2,6 +2,10 @@
 
 Note, only relatively significant changes to user-visible functionality will be included here. Most recent changes at the top.
 
+## 20241023
+
+* Initial support for rectified flow models (Flux, SD3, SD3.5). Might slightly change seeds for other models.
+
 ## 20241019
 
 * Added workaround for https://github.com/comfyanonymous/ComfyUI/issues/2833 - may change seeds. You can disable it with `seed_rng: false` in YAML parameters.

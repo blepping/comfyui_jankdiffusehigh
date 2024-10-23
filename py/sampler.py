@@ -300,6 +300,10 @@ class DiffuseHighSampler:
     def __call__(self) -> torch.Tensor:
         self.config = self.base_config.get_iteration_config("reference")
         if self.reference_image is None:
+            if self.sigmas[-1] != 0:
+                raise ValueError(
+                    "Initial reference sigmas must end at 0 (full denoise)",
+                )
             normal_step_count = len(self.sigmas) - 1
             with tqdm(
                 disable=self.disable_pbar,
@@ -327,6 +331,10 @@ class DiffuseHighSampler:
             del x_new
             self.config = self.base_config.get_iteration_config(iteration)
             self.set_schedule()
+            if self.highres_sigmas[-1] != 0:
+                raise ValueError(
+                    "Highres sigmas (including schedule overrides) must end at 0 (full denoise)",
+                )
             self.gc()
             if self.config.sigma_offset >= len(self.highres_sigmas) - 1:
                 raise ValueError(
@@ -367,15 +375,14 @@ class DiffuseHighSampler:
                 raise ValueError("Bad guidance_mode")
             x_noise = torch.randn_like(x_new)
             self.seed_offset += 1
-            x_new = x_new + x_noise * (
-                self.highres_sigmas[self.sigma_offset] * self.renoise_factor
+            x_new = self.model_sampling.noise_scaling(
+                self.highres_sigmas[self.sigma_offset],
+                x_noise.mul_(self.renoise_factor),
+                x_new,
+                max_denoise=self.highres_sigmas[self.sigma_offset]
+                >= self.model_sampling.sigma_max - 1e-05,
             )
             del x_noise
-            # x_new = self.model.inner_model.inner_model.model_sampling.noise_scaling(
-            #     self.highres_sigmas[0] * self.renoise_factor,
-            #     x_noise,
-            #     x_new,
-            # )
             self.gc()
             x_new = self.run_steps(x_new, sigmas=self.highres_sigmas)
             if iteration == self.iterations - 1:

@@ -12,14 +12,17 @@ from .external import EXTERNAL
 
 F = torch.nn.functional
 
-EXT_BLEH = EXTERNAL.get("bleh")
+BLENDING_MODES = {
+    "lerp": torch.lerp,
+}
 
-if EXT_BLEH is not None:
-    BLENDING_MODES = EXT_BLEH.latent_utils.BLENDING_MODES
-else:
-    BLENDING_MODES = {
-        "lerp": torch.lerp,
-    }
+
+def init_integrations():
+    global BLENDING_MODES  # noqa: PLW0603
+    ext_bleh = EXTERNAL.get("bleh")
+    if ext_bleh is not None:
+        BLENDING_MODES.clear()
+        BLENDING_MODES |= ext_bleh.latent_utils.BLENDING_MODES
 
 
 class SharpenMode(Enum):

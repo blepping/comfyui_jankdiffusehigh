@@ -3,6 +3,7 @@ from __future__ import annotations
 import yaml
 from comfy.samplers import KSAMPLER
 
+from .external import init_integrations
 from .sampler import diffusehigh_sampler
 from .vae import VAEMode
 
@@ -141,6 +142,7 @@ class DiffuseHighSamplerNode:
 
     @classmethod
     def go(cls, yaml_parameters: None | str = None, **kwargs: dict) -> tuple[KSAMPLER]:
+        init_integrations()
         if yaml_parameters:
             extra_params = yaml.safe_load(yaml_parameters)
             if extra_params is None:
