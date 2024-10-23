@@ -5,6 +5,7 @@ Note, only relatively significant changes to user-visible functionality will be 
 ## 20241023
 
 * Initial support for rectified flow models (Flux, SD3, SD3.5). Might slightly change seeds for other models.
+* Improve contrast adaptive sharpening (hopefully). Will change seeds for workflows using `sharpen_mode: contrast_adaptive`, you can use `sharpen_mode: contrast_adaptive_raw` for the old behavior.
 
 ## 20241019
 

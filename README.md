@@ -130,8 +130,9 @@ seed_rng: true
 # as the initial noise.
 seed_rng_offset: 1
 
-# Mode used for sharpening. Can be one of: gaussian, contrast_adaptive
-# If using contrast_adaptive, I'd recommend setting sharpen_strength a bit lower.
+# Mode used for sharpening. Can be one of:
+#   gaussian, contrast_adaptive, contrast_adaptive_raw
+# If using contrast_adaptive_raw, I'd recommend setting sharpen_strength a bit lower.
 sharpen_mode: "gaussian"
 
 sharpen_gaussian_kernel_size: 3
@@ -243,3 +244,7 @@ I tried to set the node defaults to align with the official implementation. Thes
 ## Credits
 
 Heavily referenced from the official implementation: [DiffuseHigh](https://github.com/yhyun225/DiffuseHigh/)
+
+Contrast-adaptive sharpening sources: [1](https://github.com/GPUOpen-Effects/FidelityFX-CAS/blob/master/ffx-cas/ffx_cas.h), [2](https://github.com/Jamy-L/Pytorch-Contrast-Adaptive-Sharpening/), [3](https://github.com/Clybius)
+
+Thanks!
