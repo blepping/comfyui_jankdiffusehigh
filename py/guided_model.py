@@ -14,7 +14,7 @@ class JankDiffuseHighModelWrapper:
 
     def __getattr__(self, key):
         try:
-            return getattr(self.__guided_model, key)
+            return getattr(self.__guided_model.dhso.model, key)
         except AttributeError:
             raise AttributeError(key) from None
 
