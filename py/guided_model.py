@@ -8,6 +8,20 @@ if TYPE_CHECKING:
     import torch
 
 
+class JankDiffuseHighModelWrapper:
+    def __init__(self, guided_model):
+        self.__guided_model = guided_model
+
+    def __getattr__(self, key):
+        try:
+            return getattr(self.__guided_model, key)
+        except AttributeError:
+            raise AttributeError(key) from None
+
+    def __call__(self, *args: list, **kwargs: dict) -> torch.Tensor:
+        return self.__guided_model(*args, **kwargs)
+
+
 class GuidedModel:
     def __init__(
         self,
@@ -29,20 +43,6 @@ class GuidedModel:
             self.guidance_end_sigma = None
         self.guidance_sigmas_list = tuple(guidance_sigmas.detach().cpu().tolist())
         self.guidance_steps = guidance_steps
-
-    def find_guidance_step_(self, sigma_float: float) -> None | int:
-        return (
-            next(
-                (
-                    idx
-                    for idx, gsigma in enumerate(self.guidance_sigmas_list)
-                    if gsigma <= sigma_float
-                ),
-                None,
-            )
-            if sigma_float <= self.guidance_start_sigma
-            else 0
-        )
 
     def get_guidance_step(self, sigma: torch.Tensor) -> None | int:
         sigma_float = sigma_to_float(sigma)
@@ -74,19 +74,7 @@ class GuidedModel:
         return min(step_idx, self.guidance_steps - 1)
 
     def make_wrapper(self):
-        guided_model = self
-
-        class DiffuseHighModelWrapper:
-            def __getattr__(self, k):
-                try:
-                    return getattr(guided_model, k)
-                except AttributeError:
-                    raise AttributeError(k) from None
-
-            def __call__(self, *args: list, **kwargs: dict) -> torch.Tensor:
-                return guided_model(*args, **kwargs)
-
-        return DiffuseHighModelWrapper()
+        return JankDiffuseHighModelWrapper(self)
 
     def __call__(
         self,
