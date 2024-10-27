@@ -18,3 +18,7 @@ def fallback(val, default, *, exclude=None, default_is_fun=False):
 
 def scale_dim(n, factor=1.0, *, increment=64) -> int:
     return math.ceil((n * factor) / increment) * increment
+
+
+def sigma_to_float(sigma):
+    return sigma.detach().cpu().max().item()

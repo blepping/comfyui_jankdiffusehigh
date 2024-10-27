@@ -2,6 +2,12 @@
 
 Note, only relatively significant changes to user-visible functionality will be included here. Most recent changes at the top.
 
+## 20241027
+
+* `sigma_offset` YAML parameter removed - you can use schedule overrides to accomplish the same effect (see README).
+* Chunked sampling mode added, should make samplers that care about state (i.e. momentum or history like `dpmpp_2m`) work better for guidance steps. May change seeds, you can disable with `chunked_sampling: false` in YAML parameters.
+* Added `sigma_dishonesty_factor` and `sigma_dishonesty_factor_guidance` YAML parameters - can be used to increase detail. See README.
+
 ## 20241023
 
 * Initial support for rectified flow models (Flux, SD3, SD3.5). Might slightly change seeds for other models.

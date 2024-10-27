@@ -7,7 +7,7 @@ This is a best-effort attempt at implementation. If you experience poor results,
 
 ## Current Status
 
-Alpha - early implementation. Many rough edges but the core functionality is there. Mainly targetted at advanced users who can deal with some weird stuff and frequent workflow-breaking changes.
+Beta - lightly tested but the main features are in place. Mainly targeted at advanced users who can deal with some weird stuff and frequent workflow-breaking changes.
 
 See the [changelog](changelog.md) for recent user visible changes.
 
@@ -18,7 +18,7 @@ See the [changelog](changelog.md) for recent user visible changes.
 * Using VAE or upscale models may result in the main model getting repeatedly unloaded/reloaded. Try using `latent` as the `guidance_mode`. If you actually have enough VRAM, maybe disabling smart memory (via ComfyUI commandline parameter) would help.
 * Brownian noise-based (AKA SDE) samplers may be a bit weird here, there is a workaround in place but it might not be enough. Also don't use with prompt-control's PCSplitSampling stuff.
 
-**Rectified Flow models note**: Should now work with RF models. SD3.5 apparently cannot handle high res images (even img2img) at all, so I don't recommend trying that. Flux seems to work pretty well. `image` guidance mode seems noticeably better than `latent` for Flux (based on my very limited testing) although it is slow. I haven't tested SD3.0 or other RF models, jank DiffuseHigh should handle them correctly but whether the results are actually decent I really couldn't say.
+**Rectified Flow models note**: Should now work with RF models. SD3.5 apparently cannot handle high res images (even img2img) at all, so I don't recommend trying that. Flux seems to work pretty well. `image` guidance mode seems noticeably better than `latent` for Flux (based on my very limited testing) although it is slow. I haven't tested SD3.0 or other RF models, jank DiffuseHigh should handle them correctly but whether the results are actually decent I really couldn't say. Using `guidance_restart` probably won't work correctly.
 
 ## Description
 
@@ -37,7 +37,7 @@ The main disadvantage compared to the alternatives I mentioned is that it is rel
 * `highres_sigmas`: Optional: Sigmas used for everything other than the initial reference image. **Note**: Should be around 0.3-0.5 denoise. You won't get good results connecting something like `KarrasScheduler` here without splitting the sigmas. If not specified, will use the last 15 steps of a 50 step Karras schedule like the official implementation.
 * `sampler`: Optional: Default sampler used for steps. If not specified the sampler will default to non-ancestral Euler.
 * `reference_image_opt`: Optional: Image used for the initial pass. If not connected, a low-res initial reference will be generated using the schedule from the normal sigmas (i.e. the sigmas attached to `SamplerCustom` or whatever actual sampler node you're using).
-* `guidance_sampler_opt`: Optional: Sampler used for guidance steps. If not specified, will fallback to the base sampler. Note: The sampler is called on individual steps, samplers that keep history will not work well here.
+* `guidance_sampler_opt`: Optional: Sampler used for guidance steps. If not specified, will fallback to the base sampler.
 * `reference_sampler_opt`: Optional: Sampler used to generate the initial low-resolution reference. Only used if reference_image_opt is not connected.
 * `vae_opt`: Optional when vae_mode is set to `taesd`, otherwise this is the VAE that will be used for encoding/decoding images. If using TAESD, you will require the corresponding encoder (which I believe ComfyUI does not install by default). TAESD models go in `models/vae_approx`, you can find them here: https://github.com/madebyollin/taesd
 * `upscale_model_opt`: Optional: Model used for upscaling. When not attached, simple image scaling will be used. Regardless, the image will be scaled to match the size expected based on `scale_factor`. For example, if you use scale_factor 2 and a 4x upscale model, the image will get scaled down after the upscale model runs.
@@ -58,7 +58,7 @@ The main disadvantage compared to the alternatives I mentioned is that it is rel
 
 <details>
 
-<summary>Expand for advanced parameters</summary>
+<summary>★ Click to expand for information on YAML parameters ★</summary>
 
 Note: JSON is also valid YAML so you can use that instead if you prefer.
 
@@ -144,9 +144,14 @@ sharpen_strength: 1.0
 # Disables the callback function (basically disables previews).
 skip_callback: false
 
-# Allows specifying an offset into highres_sigmas.
-# You can use a negative number here, in which case we count from the end.
-sigma_offset: 0
+# Offset to sigmas passed to the model, -0.05 would mean reduce the sigma by 5%.
+# If unset, sigma_dishonesty_factor_guidance will use the value from sigma_dishonesty_factor
+# for guidance steps.
+# Telling the model there's less noise than there actually is can increase detail
+# (and conversely telling it there's more will reduce detail/smooth things out).
+# A little goes a long way. Start with something like -0.03 to increase detail.
+sigma_dishonesty_factor: 0.0
+sigma_dishonesty_factor_guidance: null
 
 # When enabled, uses an upscale model if connected. Mainly useful with
 # iteration overrides.
@@ -210,19 +215,6 @@ iteration_override:
 
 Supported schedules: `alignyoursteps`, `beta`, `ddim_uniform`, `exponential`, `gits`, `karras`, `laplace`, `normal`, `polyexponential`, `sgm_uniform`, `simple`, `vp`
 
-Schedule overrides may also be combined with the `sigma_offset` parameter. The official DiffuseHigh uses the last 15 steps of a 50 step Karras schedule which would look like:
-
-```yaml
-schedule_override:
-    schedule_name: karras
-    steps: 50
-    # denoise defaults to 1.0 here.
-
-# Negative values count from the end.
-# Note that this is 16 because steps are from a -> b, b -> c, etc.
-sigma_offset: -16
-```
-
 </details>
 
 ***
@@ -238,13 +230,15 @@ I tried to set the node defaults to align with the official implementation. Thes
 * The sampler has a workaround for a [long standing bug in ComfyUI](https://github.com/comfyanonymous/ComfyUI/issues/2833) where generations aren't deterministic when `add_noise` is disabled in the sampler. However, this may change seeds. You can disable the workaround via the advanced YAML options - see `seed_rng` and `seed_rng_offset`.
 * For `taesd` VAE mode, you will need the TAESD encoder models available at https://github.com/madebyollin/taesd - put them in `models/vae_approx`.
 * You can use DiffuseHigh as an enhanced highres-fix by passing a pre-upscaled reference image, setting the iteration count to one and using a scale factor of 1.0.
+* Setting `sigma_dishonesty_factor` and/or `sigma_dishonesty_factor_guidance` to a low negative value can be used to increase detail even for non-ancestral samplers (similar effect to increasing `s_noise`). See the YAML parameters section of this README.
+* Using an upscale model or `image` guidance seems to make the most difference when you're going from low to mid-resolution (i.e. 512x512 to 1024x1024) so it may make sense to use the relatively slow `image` guidance and an upscale model for the first iteration and then switch to `latent` guidance and set `use_upscale_model: false` for subsequent iterations.
 
 ***
 
 ## Credits
 
-Heavily referenced from the official implementation: [DiffuseHigh](https://github.com/yhyun225/DiffuseHigh/)
-
-Contrast-adaptive sharpening sources: [1](https://github.com/GPUOpen-Effects/FidelityFX-CAS/blob/master/ffx-cas/ffx_cas.h), [2](https://github.com/Jamy-L/Pytorch-Contrast-Adaptive-Sharpening/), [3](https://github.com/Clybius)
+* Initial version heavily referenced from the official implementation: [DiffuseHigh](https://github.com/yhyun225/DiffuseHigh/)
+* Contrast-adaptive sharpening sources: [1](https://github.com/GPUOpen-Effects/FidelityFX-CAS/blob/master/ffx-cas/ffx_cas.h), [2](https://github.com/Jamy-L/Pytorch-Contrast-Adaptive-Sharpening/), [3](https://github.com/Clybius)
+* `sigma_dishonesty_factor` concept from A1111's [Detail Daemon](https://github.com/muerrilla/sd-webui-detail-daemon) extension. (There's also a [ComfyUI version](https://github.com/Jonseed/ComfyUI-Detail-Daemon) now.)
 
 Thanks!

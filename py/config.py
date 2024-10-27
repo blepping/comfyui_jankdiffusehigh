@@ -16,6 +16,7 @@ class Config:
     _overridable_fields = {  # noqa: RUF012
         "blend_by_mode",
         "blend_mode",
+        "chunked_sampling",
         "denoised_wavelet_multiplier",
         "dtcwt_biort",
         "dtcwt_mode",
@@ -44,7 +45,8 @@ class Config:
         "sharpen_reference",
         "sharpen_strength",
         "skip_callback",
-        "sigma_offset",
+        "sigma_dishonesty_factor_guidance",
+        "sigma_dishonesty_factor",
         "use_upscale_model",
         "vae_decode_kwargs",
         "vae_encode_kwargs",
@@ -71,6 +73,7 @@ class Config:
         *,
         blend_mode="lerp",
         blend_by_mode="image",
+        chunked_sampling=True,
         denoised_wavelet_multiplier=1.0,
         dtcwt_biort="near_sym_a",
         dtcwt_mode=False,
@@ -106,7 +109,8 @@ class Config:
         sharpen_reference=True,
         sharpen_strength=1.0,
         skip_callback=False,
-        sigma_offset=0,
+        sigma_dishonesty_factor_guidance: None | float = None,
+        sigma_dishonesty_factor=0.0,
         upscale_model=None,
         use_upscale_model=True,
         vae_decode_kwargs=None,
@@ -121,7 +125,11 @@ class Config:
         )
         self.seed_rng = seed_rng
         self.seed_rng_offset = seed_rng_offset
-        self.sigma_offset = sigma_offset
+        self.sigma_dishonesty_factor = sigma_dishonesty_factor
+        self.sigma_dishonesty_factor_guidance = fallback(
+            sigma_dishonesty_factor_guidance,
+            sigma_dishonesty_factor,
+        )
         self.skip_callback = skip_callback
         self.fadeout_factor = fadeout_factor
         self.scale_factor = scale_factor
@@ -190,6 +198,7 @@ class Config:
         self.blend_function = BLENDING_MODES[blend_mode]
         self.enable_gc = enable_gc
         self.enable_cache_clearing = enable_cache_clearing
+        self.chunked_sampling = chunked_sampling
         self.iteration_override = {}
         if iteration_override is None or iteration_override == {}:
             return

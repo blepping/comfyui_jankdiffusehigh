@@ -10,12 +10,13 @@ from tqdm import tqdm
 from tqdm.auto import trange
 
 from .config import Config
+from .guided_model import GuidedModel
 from .schedule import Schedule
 from .tensor_image_ops import (
     blend_wavelets,
     scale_wavelets,
 )
-from .utils import ensure_model, fallback
+from .utils import fallback
 
 
 class DiffuseHighSampler:
@@ -164,9 +165,8 @@ class DiffuseHighSampler:
             **self.schedule_override,
         ).sigmas.to(self.highres_sigmas_input)
 
-    @classmethod
     def add_restart_noise(
-        cls,
+        self,
         x: torch.Tensor,
         sigma_min: float | torch.Tensor,
         sigma_max: float | torch.Tensor,
@@ -174,7 +174,51 @@ class DiffuseHighSampler:
         s_noise: float = 1.0,
     ) -> torch.Tensor:
         noise_factor = (sigma_max**2 - sigma_min**2) ** 0.5
-        return x + torch.randn_like(x).mul_(noise_factor * s_noise)
+        return self.add_noise(x, noise_factor, factor=s_noise)
+
+    def add_noise(
+        self,
+        latent: torch.Tensor,
+        sigma: float | torch.Tensor,
+        *,
+        sigma_next: None | float | torch.Tensor = None,
+        factor=1.0,
+        allow_max_denoise=True,
+        noise_sampler: None | callable = None,
+    ) -> torch.Tensor:
+        self.seed_offset += 1
+        sigma_next = fallback(sigma_next, sigma)
+        noise = (
+            noise_sampler(sigma, sigma_next)
+            if noise_sampler is not None
+            else torch.randn_like(latent)
+        )
+        if factor != 1:
+            noise *= factor
+        return self.model_sampling.noise_scaling(
+            sigma,
+            noise,
+            latent,
+            max_denoise=allow_max_denoise
+            and sigma >= self.model_sampling.sigma_max - 1e-05,
+        )
+
+    def run_sampler_with_pbar(
+        self,
+        x: torch.Tensor,
+        sigmas: torch.Tensor,
+        pbar_title: str,
+        *args: list,
+        **kwargs: dict,
+    ):
+        with tqdm(
+            disable=self.disable_pbar,
+            total=1,
+            desc=f"{pbar_title} ({len(sigmas) - 1}) {float(sigmas[0]):>2.03f} ... {float(sigmas[-1]):>2.03f}",
+        ) as pbar:
+            x = self.run_sampler(x, sigmas, *args, **kwargs)
+            pbar.update()
+        return x
 
     def run_steps(
         self,
@@ -183,29 +227,30 @@ class DiffuseHighSampler:
         sigmas: None | torch.Tensor = None,
     ) -> torch.Tensor:
         sigmas = self.highres_sigmas if sigmas is None else sigmas
-        soffset = (
-            self.sigma_offset
-            if self.sigma_offset >= 0
-            else len(sigmas) + self.sigma_offset
-        )
-        guidance_sigmas = sigmas[soffset : soffset + self.guidance_steps + 1]
-        normal_sigmas = sigmas[soffset + self.guidance_steps :]
-        step_idx = 0
-        model = self.model
-        ensure_model(model)
+        sigmas_len = len(sigmas)
+        if sigmas_len < 2:
+            return x
+        guidance_steps = max(0, min(self.guidance_steps, sigmas_len - 1))
+        guidance_sigmas = sigmas[: guidance_steps + 1]
+        guidance_sigmas_len = len(guidance_sigmas)
+        normal_sigmas = sigmas[guidance_steps:]
+        normal_sigmas_len = len(normal_sigmas)
+        if guidance_sigmas_len < 2 and normal_sigmas_len < 2:
+            return x
+        guided_model = GuidedModel(self, guidance_sigmas, guidance_steps)
+        model_wrapper = guided_model.make_wrapper()
 
-        def model_wrapper(x, sigma, **extra_args: dict):
-            nonlocal step_idx
-            ensure_model(model)
-            denoised = model(x, sigma, **extra_args)
-            return self.apply_guidance(step_idx, denoised)
+        same_samplers = self.sampler == self.guidance_sampler
 
-        for k in (
-            "inner_model",
-            "sigmas",
-        ):
-            if hasattr(model, k):
-                setattr(model_wrapper, k, getattr(model, k))
+        if self.guidance_restart == 0 and same_samplers and self.chunked_sampling:
+            # No guidance restarts and the guidance sampler is the same as the
+            # # normal one and chunked mode enabled - we can sample all the sigmas at once.
+            return self.run_sampler_with_pbar(
+                x,
+                sigmas,
+                model=model_wrapper,
+                pbar_title="combined steps",
+            )
 
         for repidx in trange(
             self.guidance_restart + 1,
@@ -220,8 +265,33 @@ class DiffuseHighSampler:
                     guidance_sigmas[0],
                     s_noise=self.guidance_restart_s_noise,
                 )
-                self.seed_offset += 1
-            guidance_steps = len(guidance_sigmas) - 1
+            if (
+                same_samplers
+                and self.chunked_sampling
+                and repidx == self.guidance_restart
+            ):
+                # On the last guidance restart iteration, we can sample all the sigmas at once
+                # as long as the guidance sampler is the same as the normal one and we're in
+                # chunked mode.
+                return self.run_sampler_with_pbar(
+                    x,
+                    sigmas,
+                    model=model_wrapper,
+                    pbar_title="combined steps",
+                )
+            if guidance_sigmas_len < 2:
+                continue
+            if self.chunked_sampling:
+                guided_model.force_guidance = -1
+                x = self.run_sampler_with_pbar(
+                    x,
+                    guidance_sigmas,
+                    model=model_wrapper,
+                    sampler=self.guidance_sampler,
+                    pbar_title="guidance steps",
+                )
+                guided_model.force_guidance = None
+                continue
             with trange(
                 guidance_steps,
                 initial=1,
@@ -229,7 +299,7 @@ class DiffuseHighSampler:
                 desc="guidance step",
             ) as pbar:
                 for idx in pbar:
-                    step_idx = idx
+                    guided_model.force_guidance = idx
                     step_sigmas = guidance_sigmas[idx : idx + 2]
                     if step_sigmas[-1] > step_sigmas[0]:
                         raise ValueError(
@@ -245,17 +315,15 @@ class DiffuseHighSampler:
                         sampler=self.guidance_sampler,
                         disable_pbar=True,
                     )
-                    self.seed_offset += 1
-        if len(normal_sigmas) > 1:
-            ensure_model(model)
-            with tqdm(
-                disable=self.disable_pbar,
-                total=1,
-                desc=f"normal steps ({len(normal_sigmas) - 1}) {float(normal_sigmas[0]):>2.03f} ... {float(normal_sigmas[-1]):>2.03f}",
-            ) as pbar:
-                x = self.run_sampler(x, normal_sigmas)
-                pbar.update()
-                self.seed_offset += len(normal_sigmas) - 1
+            guided_model.force_guidance = None
+        if normal_sigmas_len >= 2:
+            guided_model.allow_guidance = False
+            x = self.run_sampler_with_pbar(
+                x,
+                normal_sigmas,
+                model=model_wrapper,
+                pbar_title="normal steps",
+            )
         return x
 
     @classmethod
@@ -336,17 +404,6 @@ class DiffuseHighSampler:
                     "Highres sigmas (including schedule overrides) must end at 0 (full denoise)",
                 )
             self.gc()
-            if self.config.sigma_offset >= len(self.highres_sigmas) - 1:
-                raise ValueError(
-                    "Bad sigma_offset: points to sigma past penultimate sigma",
-                )
-            if self.config.sigma_offset < 0 and (
-                self.config_sigma_offset == -1
-                or abs(self.config.sigma_offset) >= len(self.highres_sigmas)
-            ):
-                raise ValueError(
-                    "Negative sigma_offset can't point to last sigma or to sigma less than index 0",
-                )
             with tqdm(disable=self.disable_pbar, total=1, desc="upscale") as pbar:
                 img_hr = self.upscale(
                     self.reference_image,
@@ -373,16 +430,12 @@ class DiffuseHighSampler:
                     )
             else:
                 raise ValueError("Bad guidance_mode")
-            x_noise = torch.randn_like(x_new)
-            self.seed_offset += 1
-            x_new = self.model_sampling.noise_scaling(
-                self.highres_sigmas[self.sigma_offset],
-                x_noise.mul_(self.renoise_factor),
+            x_new = self.add_noise(
                 x_new,
-                max_denoise=self.highres_sigmas[self.sigma_offset]
-                >= self.model_sampling.sigma_max - 1e-05,
+                self.highres_sigmas[0],
+                sigma_next=self.highres_sigmas[1],
+                factor=self.renoise_factor,
             )
-            del x_noise
             self.gc()
             x_new = self.run_steps(x_new, sigmas=self.highres_sigmas)
             if iteration == self.iterations - 1:
