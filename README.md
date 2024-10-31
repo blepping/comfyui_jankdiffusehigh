@@ -32,6 +32,7 @@ The main disadvantage compared to the alternatives I mentioned is that it is rel
 
 ### `DiffuseHighSampler`
 
+
 #### Inputs
 
 * `highres_sigmas`: Optional: Sigmas used for everything other than the initial reference image. **Note**: Should be around 0.3-0.5 denoise. You won't get good results connecting something like `KarrasScheduler` here without splitting the sigmas. If not specified, will use the last 15 steps of a 50 step Karras schedule like the official implementation.
@@ -41,6 +42,7 @@ The main disadvantage compared to the alternatives I mentioned is that it is rel
 * `reference_sampler_opt`: Optional: Sampler used to generate the initial low-resolution reference. Only used if reference_image_opt is not connected.
 * `vae_opt`: Optional when vae_mode is set to `taesd`, otherwise this is the VAE that will be used for encoding/decoding images. If using TAESD, you will require the corresponding encoder (which I believe ComfyUI does not install by default). TAESD models go in `models/vae_approx`, you can find them here: https://github.com/madebyollin/taesd
 * `upscale_model_opt`: Optional: Model used for upscaling. When not attached, simple image scaling will be used. Regardless, the image will be scaled to match the size expected based on `scale_factor`. For example, if you use scale_factor 2 and a 4x upscale model, the image will get scaled down after the upscale model runs.
+* `input_params_opt`: Optional: Output from a `DiffuseHighParam` node. Allows connecting additional inputs that can't be specified by text (i.e. VAEs, upscale models and the like).
 * `yaml_parameters`: Optional: Allows specifying custom parameters via YAML. You can also override any of the normal parameters by key. This input can be converted into a multiline text widget. Note: When specifying paramaters this way, there is very little error checking. See below for some information about advanced parameters.
 
 #### Parameters
@@ -163,6 +165,20 @@ use_upscale_model: true
 vae_decode_kwargs: null
 vae_encode_kwargs: null
 
+# Can be used to access named parameters connected with a DiffuseHigh Param
+# node. Also serves as a reference for the default names. For example, if
+# you want to connect highres sigmas with the DiffuseHigh Param node, you
+# would set the type to "sigmas" and the name to "highres".
+vae_name: ""
+upscale_model_name: ""
+highres_sigmas_name: "highres"
+reference_image_name: "reference"
+sampler_name: ""
+reference_sampler_name: "reference"
+guidance_sampler_name: "guidance"
+custom_noise_name: ""
+restart_custom_noise_name: "restart"
+
 # Either null or an object.
 # Allows overriding the sigma used for highres steps. See description below.
 schedule_override: null
@@ -217,6 +233,34 @@ Supported schedules: `alignyoursteps`, `beta`, `ddim_uniform`, `exponential`, `g
 
 </details>
 
+### `DiffuseHighParam`
+
+This node allows you to connect additional inputs to the `DiffuseHighSampler` node, such as VAEs, upscale models, custom noise samplers. You can chain these nodes together to specify multiple parameters at once.
+
+List of main sampler inputs and corresponding parameter names:
+
+* `guidance_sampler_opt`: type `sampler`, name `guidance`
+* `highres_sigmas`: type `sigmas`, name `highres`
+* `reference_image_opt`: type `image`, name `reference`
+* `reference_sampler_opt`: type `sampler`, name `reference`
+* `sampler`: type `sampler`
+* `upscale_model_opt`: type `upscale_model`
+* `vae_opt`: type `vae`
+
+If not specified, then name is blank.
+
+#### Inputs
+
+* `value`: Input value, the type varies based on the `input_type` parameter (see below).
+* `params_opt`: Optional: You can connect the output from another DiffuseHighParam node here to specify multiple parameters.
+* `yaml_parameters`: Optional: Allows specifying custom parameters via YAML. This input can be converted into a multiline text widget. Note: When specifying paramaters this way, there is very little error checking.
+
+#### Parameters
+
+* `input_type`: Specify the input type of the connected `value`.
+* `name`: Allows specifying a name for an input.
+
+
 ***
 
 ## Tips/Recommendations
@@ -232,6 +276,15 @@ I tried to set the node defaults to align with the official implementation. Thes
 * You can use DiffuseHigh as an enhanced highres-fix by passing a pre-upscaled reference image, setting the iteration count to one and using a scale factor of 1.0.
 * Setting `sigma_dishonesty_factor` and/or `sigma_dishonesty_factor_guidance` to a low negative value can be used to increase detail even for non-ancestral samplers (similar effect to increasing `s_noise`). See the YAML parameters section of this README.
 * Using an upscale model or `image` guidance seems to make the most difference when you're going from low to mid-resolution (i.e. 512x512 to 1024x1024) so it may make sense to use the relatively slow `image` guidance and an upscale model for the first iteration and then switch to `latent` guidance and set `use_upscale_model: false` for subsequent iterations.
+* It's possible to switch VAEs, upscale models and samplers between iterations using named `DiffuseHigh Param` inputs and a YAML parameter like `vae_name: whatever`.
+***
+
+## Integration
+
+Some additional features will be available if you have other node packs installed:
+
+* [ComfyUI-TiledDiffusion](https://github.com/shiimizu/ComfyUI-TiledDiffusion) - provides better tiled VAE that JankDiffuseHigh can take advantage of.
+* You can use `OCS_CUSTOM_NOISE` or `SONAR_CUSTOM_NOISE` in the DiffuseHigh Param node if you have the respective node packs installed: [Overly Complicated Sampling](https://github.com/blepping/comfyui_overly_complicated_sampling), [ComfyUI-sonar](https://github.com/blepping/ComfyUI-sonar) installed.
 
 ***
 

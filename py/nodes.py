@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import torch
 import yaml
 from comfy.samplers import KSAMPLER
 
+from .config import ParamGroup
 from .external import init_integrations
 from .sampler import diffusehigh_sampler
 from .vae import VAEMode
@@ -128,6 +130,12 @@ class DiffuseHighSamplerNode:
                         "tooltip": "Optional: Model used for upscaling. When not attached, simple image scaling will be used. Regardless, the image will be scaled to match the size expected based on scale_factor. For example, if you use scale_factor 2 and a 4x upscale model, the image will get scaled down after the upscale model runs.",
                     },
                 ),
+                "input_params_opt": (
+                    "DIFFUSEHIGH_PARAMS",
+                    {
+                        "tooltip": "Optional: You can use a DiffuseHighParam node to specify additional parameters such as VAEs or upscale models.",
+                    },
+                ),
                 "yaml_parameters": (
                     "STRING",
                     {
@@ -141,7 +149,13 @@ class DiffuseHighSamplerNode:
         }
 
     @classmethod
-    def go(cls, yaml_parameters: None | str = None, **kwargs: dict) -> tuple[KSAMPLER]:
+    def go(
+        cls,
+        *,
+        input_params_opt: None | ParamGroup = None,
+        yaml_parameters: None | str = None,
+        **kwargs: dict,
+    ) -> tuple[KSAMPLER]:
         init_integrations()
         if yaml_parameters:
             extra_params = yaml.safe_load(yaml_parameters)
@@ -153,6 +167,34 @@ class DiffuseHighSamplerNode:
                 )
             else:
                 kwargs |= extra_params
+        params_opt = (
+            ParamGroup(items={})
+            if input_params_opt is None
+            else input_params_opt.clone()
+        )
+        pg = ParamGroup(items={})
+        for key, pgkey in (
+            ("guidance_sampler_opt", ("sampler", "guidance")),
+            ("highres_sigmas", ("sigmas", "highres")),
+            ("reference_sampler_opt", ("sampler", "reference")),
+            ("reference_image_opt", ("image", "reference")),
+            ("sampler", ("sampler", "")),
+            ("upscale_model_opt", ("upscale_model", "")),
+            ("vae_opt", ("vae", "")),
+        ):
+            val = kwargs.pop(key, None)
+            if val is None:
+                continue
+            pg[pgkey] = val
+        clashed = tuple(k for k in params_opt if k in pg)
+        if clashed:
+            clashedstr = ", ".join(
+                f"{k[0]}" if not k[1] else f"{k[0]} ({k[1]})" for k in clashed
+            )
+            errstr = f"Extra param names conflict with sampler node inputs. Please rename the conflicting extra params: {clashedstr}"
+            raise ValueError(errstr)
+        pg.items |= params_opt.items
+        kwargs["_params"] = pg
         return (
             KSAMPLER(
                 diffusehigh_sampler,
@@ -161,3 +203,122 @@ class DiffuseHighSamplerNode:
                 },
             ),
         )
+
+
+class Wildcard(str):
+    __slots__ = ("whitelist",)
+
+    @classmethod
+    def __new__(cls, s, *args: list, whitelist=None, **kwargs: dict):
+        result = super().__new__(s, *args, **kwargs)
+        result.whitelist = whitelist
+        return result
+
+    def __ne__(self, other):
+        return False if self.whitelist is None else other not in self.whitelist
+
+
+class DiffuseHighParamNode:
+    RETURN_TYPES = ("DIFFUSEHIGH_PARAMS",)
+    CATEGORY = "sampling/custom_sampling/JankDiffuseHigh"
+    DESCRIPTION = "Jank DiffuseHigh parameter definition node. Used to set parameters like custom noise types that require an input."
+    OUTPUT_TYPES = (
+        "Can be connected to another DiffuseHigh Param or DiffuseHigh sampler node.",
+    )
+
+    FUNCTION = "go"
+
+    WC = Wildcard(
+        "*",
+        whitelist={
+            "IMAGE",
+            "OCS_CUSTOM_NOISE",
+            "SAMPLER",
+            "SIGMAS",
+            "SONAR_CUSTOM_NOISE",
+            "UPSCALE_MODEL",
+            "VAE",
+        },
+    )
+
+    PARAM_TYPES = {  # noqa: RUF012
+        "vae": lambda _v: True,
+        "sampler": lambda v: hasattr(v, "sampler_function"),
+        "upscale_model": lambda _v: True,
+        "image": lambda v: isinstance(v, torch.Tensor) and v.ndim == 4,
+        "sigmas": lambda v: isinstance(v, torch.Tensor) and v.ndim == 1 and len(v) >= 2,
+        "custom_noise": lambda v: hasattr(v, "make_noise_sampler"),
+    }
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "input_type": (
+                    tuple(cls.PARAM_TYPES.keys()),
+                    {
+                        "tooltip": "Used to set the type of custom parameter.",
+                    },
+                ),
+                "value": (
+                    cls.WC,
+                    {
+                        "tooltip": "Connect the type of value expected by the key. Allows connecting output from any type of node HOWEVER if it is the wrong type expected by the key you will get an error when you run the workflow.",
+                    },
+                ),
+            },
+            "optional": {
+                "name": (
+                    "STRING",
+                    {
+                        "default": "",
+                        "tooltip": "You can name a parameter input here (alphanumeric or underscore only) to allow using multiple parameters of the same type.",
+                    },
+                ),
+                "params_opt": (
+                    "DIFFUSEHIGH_PARAMS",
+                    {
+                        "tooltip": "You may optionally connect the output from another jank DiffuseHigh param node here to set multiple parameters.",
+                    },
+                ),
+                "yaml_parameters": (
+                    "STRING",
+                    {
+                        "tooltip": "Allows specifying custom parameters for an input via YAML. This input can be converted into a multiline text widget. Note: When specifying paramaters this way, there is very little error checking.",
+                        "dynamicPrompts": False,
+                        "multiline": True,
+                        "defaultInput": True,
+                    },
+                ),
+            },
+        }
+
+    @classmethod
+    def get_renamed_key(cls, key, *, name=None):
+        if not isinstance(name, str) or not name:
+            return (key, "")
+        if not isinstance(name, str):
+            raise TypeError("Param name key must be a string if set")
+        name = name.strip()
+        if not name or not all(c == "_" or c.isalnum() for c in name):
+            raise ValueError(
+                "Param name keys must consist of one or more alphanumeric or underscore characters",
+            )
+        return (key, name)
+
+    def go(self, *, input_type, value, name="", params_opt=None, yaml_parameters=""):
+        if not self.PARAM_TYPES[input_type](value):
+            errstr = f"DiffuseHighParam: Bad value type for input_type {input_type}"
+            raise TypeError(errstr)
+        if yaml_parameters:
+            extra_params = yaml.safe_load(yaml_parameters)
+            if extra_params is not None and not isinstance(extra_params, dict):
+                raise ValueError("Parameters must be a JSON or YAML object")
+        else:
+            extra_params = None
+        key = self.get_renamed_key(input_type, name=name)
+        params = ParamGroup(items={}) if params_opt is None else params_opt.clone()
+        params[key] = value
+        if extra_params is not None:
+            params[(*key, "params")] = extra_params
+        return (params,)

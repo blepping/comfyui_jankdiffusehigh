@@ -29,12 +29,7 @@ class DiffuseHighSampler:
         callback: None | callable,
         extra_args: None | dict,
         disable_pbar: None | bool,
-        highres_sigmas: None | torch.Tensor = None,
-        guidance_sampler_opt: None | object = None,
-        reference_sampler_opt: None | object = None,
-        reference_image_opt: None | object = None,
-        vae_opt: None | object = None,
-        upscale_model_opt: None | object = None,
+        _params,
         **kwargs: dict[str, Any],
     ):
         self.s_in = initial_x.new_ones((initial_x.shape[0],))
@@ -46,46 +41,33 @@ class DiffuseHighSampler:
         self.model = model
         self.latent_format = model.inner_model.inner_model.latent_format
         self.model_sampling = model.inner_model.inner_model.model_sampling
-        self.config = self.base_config = Config(
+        self._params = _params
+        self.cfg = self.base_config = Config(
             initial_x.device,
             initial_x.dtype,
             self.latent_format,
-            guidance_sampler=guidance_sampler_opt,
-            reference_sampler=reference_sampler_opt,
-            vae=vae_opt,
-            upscale_model=upscale_model_opt,
+            _params=_params,
             **kwargs,
         )
-        if highres_sigmas is not None:
-            self.highres_sigmas_input = highres_sigmas.detach().clone().to(sigmas)
-        else:
-            self.highres_sigmas_input = (
-                Schedule(
-                    self.model_sampling,
-                    self.latent_format,
-                    "karras",
-                    steps=50,
-                )
-                .sigmas[-16:]
-                .to(sigmas)
-            )
         self.highres_sigmas: None | torch.FloatTensor = None
-        self.reference_image: None | torch.FloatTensor = reference_image_opt
+        self.reference_image: None | torch.FloatTensor = None
         self.guidance_waves = None
         self.seed_offset = 0
         self.seed = self.extra_args.get("seed")
-        if self.config.seed_rng:
+        if self.cfg.seed_rng:
             seed = self.seed
             if seed is not None:
                 torch.manual_seed(seed)
                 random.seed(seed)
-                for _ in range(self.config.seed_rng_offset):
+                for _ in range(self.cfg.seed_rng_offset):
                     _ = random.random()  # noqa: S311
                     _ = torch.randn_like(initial_x)
                     self.seed_offset += 1
+        if self.seed is None:
+            self.seed = 0
 
     def __getattr__(self, key: str) -> Any:  # noqa: ANN401
-        return getattr(self.config, key)
+        return getattr(self.cfg, key)
 
     def gc(self) -> None:
         if (
@@ -155,16 +137,6 @@ class DiffuseHighSampler:
             denoised.new_full((1,), mix_scale),
         )
 
-    def set_schedule(self) -> None:
-        if self.schedule_override is None:
-            self.highres_sigmas = self.highres_sigmas_input
-            return
-        self.highres_sigmas = Schedule(
-            self.model_sampling,
-            self.latent_format,
-            **self.schedule_override,
-        ).sigmas.to(self.highres_sigmas_input)
-
     def add_restart_noise(
         self,
         x: torch.Tensor,
@@ -174,7 +146,12 @@ class DiffuseHighSampler:
         s_noise: float = 1.0,
     ) -> torch.Tensor:
         noise_factor = (sigma_max**2 - sigma_min**2) ** 0.5
-        return self.add_noise(x, noise_factor, factor=s_noise)
+        return self.add_noise(
+            x,
+            noise_factor,
+            factor=s_noise,
+            noise_sampler=self.restart_noise_sampler,
+        )
 
     def add_noise(
         self,
@@ -188,11 +165,8 @@ class DiffuseHighSampler:
     ) -> torch.Tensor:
         self.seed_offset += 1
         sigma_next = fallback(sigma_next, sigma)
-        noise = (
-            noise_sampler(sigma, sigma_next)
-            if noise_sampler is not None
-            else torch.randn_like(latent)
-        )
+        noise_sampler = fallback(noise_sampler, self.noise_sampler)
+        noise = noise_sampler(sigma, sigma_next)
         if factor != 1:
             noise *= factor
         return self.model_sampling.noise_scaling(
@@ -365,8 +339,78 @@ class DiffuseHighSampler:
             **sampler.extra_options,
         )
 
+    def set_schedule(self) -> None:
+        if self.schedule_override is not None:
+            self.highres_sigmas = Schedule(
+                self.model_sampling,
+                self.latent_format,
+                **self.schedule_override,
+            ).sigmas.to(self.sigmas)
+            return
+        highres_sigmas = self._params.get_item(
+            "sigmas",
+            name=self.cfg.highres_sigmas_name,
+        )
+        if highres_sigmas is None:
+            self.highres_sigmas = Schedule(
+                self.model_sampling,
+                self.latent_format,
+                "karras",
+                steps=15,
+                denoise=0.3,
+            ).sigmas.to(self.sigmas)
+            return
+        self.highres_sigmas = highres_sigmas.detach().clone().to(self.sigmas)
+
+    def update_iteration_config(self, iteration: int | str) -> None:
+        self.cfg = self.base_config.get_iteration_config(iteration)
+        self.set_schedule()
+        if iteration == "reference":
+            self.reference_image = self._params.get_item(
+                "image",
+                name=self.cfg.reference_image_name,
+            )
+
+    def get_noise_sampler(self, x, sigmas, *, name=""):
+        custom_noise = self._params.get_item("custom_noise", name=name)
+        if custom_noise is None:
+            return lambda _s, _sn: torch.randn_like(x)
+        custom_noise_params = self._params.get_item(
+            "custom_noise",
+            name=name,
+            param_mode=True,
+            default={},
+        )
+        custom_noise_params = {
+            "normalized": True,
+            "seed": self.seed + self.seed_offset,
+            "cpu": True,
+        } | custom_noise_params
+        self.seed_offset += 1
+        return custom_noise.make_noise_sampler(
+            x,
+            sigmas.min(),
+            sigmas.max(),
+            **custom_noise_params,
+        )
+
+    def update_noise_samplers(self, x):
+        self.noise_sampler = self.get_noise_sampler(
+            x,
+            self.highres_sigmas,
+            name=self.cfg.custom_noise_name,
+        )
+        if self.guidance_restart == 0:
+            self.restart_noise_sampler = None
+            return
+        self.restart_noise_sampler = self.get_noise_sampler(
+            x,
+            self.highres_sigmas,
+            name=self.cfg.restart_custom_noise_name,
+        )
+
     def __call__(self) -> torch.Tensor:
-        self.config = self.base_config.get_iteration_config("reference")
+        self.update_iteration_config("reference")
         if self.reference_image is None:
             if self.sigmas[-1] != 0:
                 raise ValueError(
@@ -388,7 +432,7 @@ class DiffuseHighSampler:
             self.reference_image = self.vae.decode(x_lr, disable_pbar=self.disable_pbar)
         elif self.iterations < 1:
             return self.vae.encode(self.reference_image, disable_pbar=self.disable_pbar)
-        self.config = self.base_config
+        self.cfg = self.base_config
         x_new = None
         for iteration in trange(
             self.iterations,
@@ -396,9 +440,8 @@ class DiffuseHighSampler:
             initial=1,
             desc="DiffuseHigh iteration",
         ):
+            self.update_iteration_config(iteration)
             del x_new
-            self.config = self.base_config.get_iteration_config(iteration)
-            self.set_schedule()
             if self.highres_sigmas[-1] != 0:
                 raise ValueError(
                     "Highres sigmas (including schedule overrides) must end at 0 (full denoise)",
@@ -430,6 +473,7 @@ class DiffuseHighSampler:
                     )
             else:
                 raise ValueError("Bad guidance_mode")
+            self.update_noise_samplers(x_new)
             x_new = self.add_noise(
                 x_new,
                 self.highres_sigmas[0],

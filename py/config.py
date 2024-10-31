@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from comfy.samplers import ksampler
 from pytorch_wavelets import DTCWTForward, DTCWTInverse, DWTForward, DWTInverse
 
@@ -17,6 +19,7 @@ class Config:
         "blend_by_mode",
         "blend_mode",
         "chunked_sampling",
+        "custom_noise_name",
         "denoised_wavelet_multiplier",
         "dtcwt_biort",
         "dtcwt_mode",
@@ -32,11 +35,17 @@ class Config:
         "guidance_mode",
         "guidance_restart_s_noise",
         "guidance_restart",
+        "guidance_sampler_name",
         "guidance_steps",
+        "highres_sigmas_name",
+        "reference_image_name",
+        "reference_sampler_name",
         "reference_wavelet_multiplier",
         "renoise_factor",
         "resample_mode",
         "rescale_increment",
+        "restart_custom_noise_name",
+        "sampler_name",
         "scale_factor",
         "schedule_override",
         "sharpen_gaussian_kernel_size",
@@ -44,13 +53,15 @@ class Config:
         "sharpen_mode",
         "sharpen_reference",
         "sharpen_strength",
-        "skip_callback",
         "sigma_dishonesty_factor_guidance",
         "sigma_dishonesty_factor",
+        "skip_callback",
+        "upscale_model_name",
         "use_upscale_model",
         "vae_decode_kwargs",
         "vae_encode_kwargs",
         "vae_mode",
+        "vae_name",
     }
 
     _dict_exclude_keys = {  # noqa: RUF012
@@ -58,8 +69,12 @@ class Config:
         "blend_function",
         "dwt",
         "get_iteration_config",
+        "guidance_sampler",
+        "highres_sigmas",
         "idwt",
         "iteration_override",
+        "reference_sampler",
+        "sampler",
         "sharpen",
         "upscale",
         "vae",
@@ -71,6 +86,7 @@ class Config:
         dtype,
         latent_format,
         *,
+        _params,
         blend_mode="lerp",
         blend_by_mode="image",
         chunked_sampling=True,
@@ -89,16 +105,13 @@ class Config:
         guidance_mode="image",
         guidance_restart_s_noise=1.0,
         guidance_restart=0,
-        guidance_sampler=None,
         guidance_steps=5,
         iteration_override=None,
         iterations=1,
-        reference_sampler=None,
         reference_wavelet_multiplier=1.0,
         renoise_factor=1.0,
         resample_mode="bicubic",
         rescale_increment=64,
-        sampler=None,
         scale_factor=2.0,
         schedule_override=None,
         seed_rng=True,
@@ -111,13 +124,40 @@ class Config:
         skip_callback=False,
         sigma_dishonesty_factor_guidance: None | float = None,
         sigma_dishonesty_factor=0.0,
-        upscale_model=None,
         use_upscale_model=True,
         vae_decode_kwargs=None,
         vae_encode_kwargs=None,
         vae_mode="normal",
-        vae=None,
+        vae_name="",
+        upscale_model_name="",
+        highres_sigmas_name="highres",
+        reference_image_name="reference",
+        sampler_name="",
+        reference_sampler_name="reference",
+        guidance_sampler_name="guidance",
+        custom_noise_name="",
+        restart_custom_noise_name="restart",
     ):
+        self.vae_name = vae_name
+        self.upscale_model_name = upscale_model_name
+        self.highres_sigmas_name = highres_sigmas_name
+        self.reference_image_name = reference_image_name
+        self.reference_sampler_name = reference_sampler_name
+        self.guidance_sampler_name = guidance_sampler_name
+        self.sampler_name = sampler_name
+        self.custom_noise_name = custom_noise_name
+        self.restart_custom_noise_name = restart_custom_noise_name
+
+        sampler = _params.get_item("sampler", name=sampler_name)
+        guidance_sampler = _params.get_item("sampler", name=guidance_sampler_name)
+        reference_sampler = _params.get_item("sampler", name=reference_sampler_name)
+        upscale_model = _params.get_item("upscale_model", name=upscale_model_name)
+        vae = _params.get_item("vae", name=vae_name)
+        highres_sigmas = _params.get_item("sigmas", name=highres_sigmas_name)
+        self.highres_sigmas = (
+            None if highres_sigmas is None else highres_sigmas.detach().clone()
+        )
+
         sampler = fallback(
             sampler,
             lambda: ksampler("euler"),
@@ -214,7 +254,13 @@ class Config:
             okwargs = selfdict | {
                 ok: ov for ok, ov in v.items() if ok in self._overridable_fields
             }
-            overrides[k] = self.__class__(device, dtype, latent_format, **okwargs)
+            overrides[k] = self.__class__(
+                device,
+                dtype,
+                latent_format,
+                _params=_params,
+                **okwargs,
+            )
 
     def as_dict(self) -> dict:
         result = {
@@ -223,7 +269,6 @@ class Config:
             if not k.startswith("_") and k not in self._dict_exclude_keys
         }
         result["vae_mode"] = self.vae.mode.name.lower()
-        result["vae"] = self.vae.vae
         result["vae_encode_kwargs"] = self.vae.encode_kwargs
         result["vae_decode_kwargs"] = self.vae.decode_kwargs
         result["sharpen_reference"] = self.sharpen.strength != 0
@@ -232,9 +277,44 @@ class Config:
         result["sharpen_gaussian_sigma"] = self.sharpen.gaussian_sigma
         result["resample_mode"] = self.upscale.resample_mode
         result["rescale_increment"] = self.upscale.rescale_increment
-        result["upscale_model"] = self.upscale.upscale_model
         return result
 
     def get_iteration_config(self, iteration):
         override = self.iteration_override.get(iteration)
         return override.get_iteration_config(iteration) if override else self
+
+
+class ParamGroup:
+    def __init__(self, items=None):
+        self.items = {} if items is None else items
+
+    def clone(self):
+        return self.__class__(items=self.items.copy())
+
+    def append(self, item):
+        self.items.append(item)
+        return item
+
+    def __getitem__(self, key):
+        return self.items[key]
+
+    def __setitem__(self, key, value):
+        self.items[key] = value
+
+    def __len__(self):
+        return len(self.items)
+
+    def __iter__(self):
+        return self.items.__iter__()
+
+    def get_item(
+        self,
+        type_name: str,
+        *,
+        name: None | str = "",
+        param_mode: bool = False,
+        default: None | Any = None,  # noqa: ANN401
+    ) -> Any:  # noqa: ANN401
+        name = name if name is not None else ""
+        key = (type_name, name) if not param_mode else (type_name, name, "params")
+        return self.items.get(key, default)

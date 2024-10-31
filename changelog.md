@@ -2,6 +2,10 @@
 
 Note, only relatively significant changes to user-visible functionality will be included here. Most recent changes at the top.
 
+## 20241031
+
+* Added the `DiffuseHighParam` node and the ability to connect multiple VAEs, upscale models, noise generators and samplers as well as switch between them per iteration.
+
 ## 20241027
 
 * `sigma_offset` YAML parameter removed - you can use schedule overrides to accomplish the same effect (see README).
