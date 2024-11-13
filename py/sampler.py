@@ -101,7 +101,10 @@ class DiffuseHighSampler:
             denoised_waves = self.dwt(denoised)
         denoised_waves_orig = denoised_waves
         if self.denoised_wavelet_multiplier != 1:
-            denoised_waves = scale_wavelets(self.denoised_wavelet_multiplier)
+            denoised_waves = scale_wavelets(
+                denoised_waves,
+                self.denoised_wavelet_multiplier,
+            )
         coeffs = (
             (self.guidance_waves[0], denoised_waves[1])
             if not self.dwt_flip_filters
@@ -466,13 +469,13 @@ class DiffuseHighSampler:
                 )
             elif self.guidance_mode == "latent":
                 self.guidance_waves = self.dwt(x_new)
-                if self.reference_wavelet_multiplier != 1:
-                    self.guidance_waves = scale_wavelets(
-                        self.guidance_waves,
-                        self.reference_wavelet_multiplier,
-                    )
             else:
                 raise ValueError("Bad guidance_mode")
+            if self.reference_wavelet_multiplier != 1:
+                self.guidance_waves = scale_wavelets(
+                    self.guidance_waves,
+                    self.reference_wavelet_multiplier,
+                )
             self.update_noise_samplers(x_new)
             x_new = self.add_noise(
                 x_new,
