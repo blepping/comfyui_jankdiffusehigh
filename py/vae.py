@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 from enum import Enum, auto
+from typing import TYPE_CHECKING
 
 import folder_paths
-import torch
-from comfy.taesd.taesd import TAESD
+from comfy.model_management import device_supports_non_blocking
+from comfy.taesd import taesd
 from tqdm import tqdm
 
 from .external import EXTERNAL
 from .utils import fallback
+
+if TYPE_CHECKING:
+    import torch
 
 tiled_diffusion = None
 
@@ -39,7 +43,11 @@ class VAEHelper:
     ):
         if isinstance(mode, str):
             mode = VAEMode.__members__[mode.upper()]
-        if mode == VAEMode.TILED_DIFFUSION:
+        if mode == VAEMode.TAESD:
+            vae = TAESD(latent_format, device=device)
+        elif vae is None:
+            raise ValueError("Must pass a VAE when using non-TAESD VAE modes!")
+        elif mode == VAEMode.TILED_DIFFUSION:
             if tiled_diffusion is None:
                 raise ValueError(
                     "Cannot use tiled_diffusion VAE mode without ComfyUI-TiledDiffusion!",
@@ -63,8 +71,6 @@ class VAEHelper:
                     tiled_diffusion.tiled_vae.VAEDecodeTiled_TiledDiffusion,
                 )
             )
-        if mode != VAEMode.TAESD and vae is None:
-            raise ValueError("Must pass a VAE when using non-TAESD VAE modes!")
         self.mode = mode
         self.latent_format = latent_format
         self.device = device
@@ -105,11 +111,10 @@ class VAEHelper:
         return result
 
     def encode_taesd(self, imgbatch):
-        dummy = torch.zeros((), device=self.device, dtype=self.dtype)
-        return OCSTAESD.encode(self.latent_format, imgbatch, dummy)
+        return self.vae.encode(imgbatch, device=self.device)
 
     def decode_taesd(self, latent):
-        return OCSTAESD.decode(self.latent_format, latent)
+        return self.vae.decode(latent)
 
     def encode_vae(self, imgbatch):
         return self.vae.encode(imgbatch, **self.encode_kwargs)
@@ -140,7 +145,13 @@ class VAEHelper:
         )[0]
 
 
-class OCSTAESD:
+class TAESD:
+    def __init__(self, latent_format, *, device=None):
+        self.encoder = None
+        self.decoder = None
+        self.latent_format = latent_format
+        self.device = device
+
     @classmethod
     def get_encoder_name(cls, latent_format):
         result = latent_format.taesd_decoder_name
@@ -166,13 +177,32 @@ class OCSTAESD:
             raise RuntimeError(msg)
         return folder_paths.get_full_path("vae_approx", taesd_path)
 
-    @classmethod
-    def decode(cls, latent_format, latent):
-        filename = cls.get_taesd_path(latent_format.taesd_decoder_name)
-        model = TAESD(
-            decoder_path=filename,
-            latent_channels=latent_format.latent_channels,
-        ).to(latent.device)
+    def ensure_encoder(self, device=None):
+        if self.encoder is None:
+            filename = self.get_taesd_path(self.get_encoder_name(self.latent_format))
+            self.encoder = taesd.TAESD(
+                encoder_path=filename,
+                latent_channels=self.latent_format.latent_channels,
+            )
+        device = fallback(device, self.device)
+        if device is not None:
+            self.encoder.to(device, non_blocking=device_supports_non_blocking(device))
+        return self.encoder
+
+    def ensure_decoder(self, device=None):
+        if self.decoder is None:
+            filename = self.get_taesd_path(self.latent_format.taesd_decoder_name)
+            self.decoder = taesd.TAESD(
+                decoder_path=filename,
+                latent_channels=self.latent_format.latent_channels,
+            )
+        device = fallback(device, self.device)
+        if device is not None:
+            self.decoder.to(device, non_blocking=device_supports_non_blocking(device))
+        return self.decoder
+
+    def decode(self, latent):
+        model = self.ensure_decoder(device=latent.device)
         return (
             model.taesd_decoder(
                 (latent - model.vae_shift).mul_(model.vae_scale),
@@ -181,15 +211,16 @@ class OCSTAESD:
             .movedim(1, -1)
         )
 
-    @classmethod
-    def encode(cls, latent_format, imgbatch, latent) -> torch.Tensor:
-        filename = cls.get_taesd_path(cls.get_encoder_name(latent_format))
-        model = TAESD(
-            encoder_path=filename,
-            latent_channels=latent_format.latent_channels,
-        ).to(device=latent.device)
+    def encode(self, imgbatch, device=None) -> torch.Tensor:
+        model = self.ensure_encoder(device=device)
+        if device is not None:
+            imgbatch = (
+                imgbatch.detach()
+                .clone()
+                .to(device, non_blocking=device_supports_non_blocking(device))
+            )
         return (
-            model.taesd_encoder(imgbatch.to(latent.device).moveaxis(-1, 1))
+            model.taesd_encoder(imgbatch.moveaxis(-1, 1))
             .div_(model.vae_scale)
             .add_(model.vae_shift)
         )
