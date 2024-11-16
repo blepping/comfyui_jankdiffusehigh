@@ -205,7 +205,7 @@ class DiffuseHighSamplerNode:
         )
 
 
-class Wildcard(str):
+class Wildcard(str):  # noqa: FURB189
     __slots__ = ("whitelist",)
 
     @classmethod
@@ -232,7 +232,7 @@ class DiffuseHighParamNode:
         "*",
         whitelist={
             "IMAGE",
-            "OCS_CUSTOM_NOISE",
+            "OCS_NOISE",
             "SAMPLER",
             "SIGMAS",
             "SONAR_CUSTOM_NOISE",
