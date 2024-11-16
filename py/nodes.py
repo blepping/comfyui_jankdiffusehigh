@@ -232,6 +232,7 @@ class DiffuseHighParamNode:
         "*",
         whitelist={
             "IMAGE",
+            "MASK",
             "OCS_NOISE",
             "SAMPLER",
             "SIGMAS",
@@ -248,6 +249,7 @@ class DiffuseHighParamNode:
         "image": lambda v: isinstance(v, torch.Tensor) and v.ndim == 4,
         "sigmas": lambda v: isinstance(v, torch.Tensor) and v.ndim == 1 and len(v) >= 2,
         "custom_noise": lambda v: hasattr(v, "make_noise_sampler"),
+        "mask": lambda v: isinstance(v, torch.Tensor) and v.ndim in {2, 3},
     }
 
     @classmethod

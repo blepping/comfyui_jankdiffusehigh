@@ -6,6 +6,8 @@ import sys
 from typing import Any
 
 import torch
+from comfy.model_management import device_supports_non_blocking
+from comfy.utils import reshape_mask
 from tqdm import tqdm
 from tqdm.auto import trange
 
@@ -13,6 +15,7 @@ from .config import Config
 from .guided_model import GuidedModel
 from .schedule import Schedule
 from .tensor_image_ops import (
+    BLENDING_MODES,
     blend_wavelets,
     scale_wavelets,
 )
@@ -32,6 +35,7 @@ class DiffuseHighSampler:
         _params,
         **kwargs: dict[str, Any],
     ):
+        self.non_blocking = device_supports_non_blocking(initial_x.device)
         self.s_in = initial_x.new_ones((initial_x.shape[0],))
         self.initial_x = initial_x
         self.callback = callback
@@ -52,6 +56,7 @@ class DiffuseHighSampler:
         self.highres_sigmas: None | torch.FloatTensor = None
         self.reference_image: None | torch.FloatTensor = None
         self.guidance_waves = None
+        self.mask = self.guidance_mask = None
         self.seed_offset = 0
         self.seed = self.extra_args.get("seed")
         if self.cfg.seed_rng:
@@ -90,10 +95,11 @@ class DiffuseHighSampler:
             return denoised
         if self.guidance_mode not in {"image", "latent"}:
             raise ValueError("Bad guidance mode")
+        blend_function = BLENDING_MODES[self.blend_mode]
         if self.guidance_mode == "image":
             dn_img = (
                 self.vae.decode(denoised, disable_pbar=self.disable_pbar)
-                .to(denoised)
+                .to(denoised, non_blocking=self.non_blocking)
                 .movedim(-1, 1)
             )
             denoised_waves = self.dwt(dn_img)
@@ -117,14 +123,14 @@ class DiffuseHighSampler:
                 denoised_waves_orig,
                 coeffs,
                 mix_scale,
-                self.blend_function,
+                blend_function,
             )
         result = self.idwt(coeffs)
         if self.guidance_mode == "image":
             if self.blend_by_mode == "image":
-                result = self.blend_function(
+                result = blend_function(
                     dn_img,
-                    result.to(dn_img),
+                    result.to(dn_img, non_blocking=self.non_blocking),
                     dn_img.new_full((1,), mix_scale),
                 ).clamp_(0, 1)
             result = self.vae.encode(
@@ -133,12 +139,20 @@ class DiffuseHighSampler:
                 disable_pbar=self.disable_pbar,
             )
         if self.blend_by_mode != "latent":
-            return result.to(denoised)
-        return self.blend_function(
-            denoised,
-            result.to(denoised),
-            denoised.new_full((1,), mix_scale),
-        )
+            result = result.to(denoised, non_blocking=self.non_blocking)
+        else:
+            result = blend_function(
+                denoised,
+                result.to(denoised, non_blocking=self.non_blocking),
+                denoised.new_full((1,), mix_scale),
+            )
+        if self.guidance_mask is not None:
+            result = BLENDING_MODES[self.guidance_mask_blend_mode](
+                denoised,
+                result,
+                self.guidance_mask,
+            )
+        return result
 
     def add_restart_noise(
         self,
@@ -374,6 +388,25 @@ class DiffuseHighSampler:
                 name=self.cfg.reference_image_name,
             )
 
+    def update_masks(self, latent):
+        self.curr_mask = self.guidance_mask = None
+        for name, is_guidance in (
+            (self.mask_name, False),
+            (self.guidance_mask_name, True),
+        ):
+            mask = self._params.get_item("mask", name=name)
+            if mask is None:
+                continue
+            mask = reshape_mask(mask.detach().clone(), latent.shape).to(
+                latent,
+                non_blocking=self.non_blocking,
+            )
+            if is_guidance:
+                self.guidance_mask = mask
+            else:
+                self.mask = mask
+        self.orig_latent = latent.detach().clone() if self.mask is not None else None
+
     def get_noise_sampler(self, x, sigmas, *, name=""):
         custom_noise = self._params.get_item("custom_noise", name=name)
         if custom_noise is None:
@@ -462,10 +495,13 @@ class DiffuseHighSampler:
             x_new = self.vae.encode(
                 self.reference_image,
                 disable_pbar=self.disable_pbar,
-            ).to(self.initial_x)
+            ).to(self.initial_x, non_blocking=self.non_blocking)
+            self.update_masks(x_new)
             if self.guidance_mode == "image":
                 self.guidance_waves = self.dwt(
-                    self.reference_image.clone().movedim(-1, 1).to(self.initial_x),
+                    self.reference_image.clone()
+                    .movedim(-1, 1)
+                    .to(self.initial_x, non_blocking=self.non_blocking),
                 )
             elif self.guidance_mode == "latent":
                 self.guidance_waves = self.dwt(x_new)
@@ -487,6 +523,7 @@ class DiffuseHighSampler:
             x_new = self.run_steps(x_new, sigmas=self.highres_sigmas)
             if iteration == self.iterations - 1:
                 break
+            self.mask = self.guidance_mask = None
             self.reference_image = self.vae.decode(
                 x_new,
                 disable_pbar=self.disable_pbar,

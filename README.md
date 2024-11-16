@@ -32,6 +32,13 @@ The main disadvantage compared to the alternatives I mentioned is that it is rel
 
 ### `DiffuseHighSampler`
 
+This is the main DiffuseHigh sampler node.
+
+I recommend expanding the YAML Parameters section and at least skimming through it so you can see what your options are. Most advanced features are controlled there - you can do stuff like switch VAEs, upscale models or other parameters per iteration which can be a very powerful tool.
+
+**Input Parameters**: You can connect stuff like VAEs, upscale models and masks using this input.
+
+**Mask Usage**: Masks can be connected via `input_params_opt`. There are currently two ways they can be used: as a global mask or to mask the guidance. If the mask has no name, it is by default a global mask. If you name it `guidance` then it will be treated as a guidance mask. You don't have to stick to those names, `mask_name` and `guidance_mask_name` in the YAML parameters can be used to control what masks are used. Where global masks are set, the model is allowed to change the image - where they aren't set, it will be the reference image. Guidance masks apply guidance where the mask is set and you get the model's normal prediction otherwise. Non-binary masks work the way you'd expect: you'll get a blend based on the mask strength in a particular area.
 
 #### Inputs
 
@@ -178,6 +185,8 @@ reference_sampler_name: "reference"
 guidance_sampler_name: "guidance"
 custom_noise_name: ""
 restart_custom_noise_name: "restart"
+mask_name: ""
+guidance_mask_name: "guidance"
 
 # Either null or an object.
 # Allows overriding the sigma used for highres steps. See description below.

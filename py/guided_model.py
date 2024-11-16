@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from .tensor_image_ops import BLENDING_MODES
 from .utils import ensure_model, sigma_to_float
 
 if TYPE_CHECKING:
@@ -101,8 +102,15 @@ class GuidedModel:
             sigma * sigma_offset if sigma_offset != 1 else sigma,
             **extra_args,
         )
-        return (
+        result = (
             denoised
             if guidance_step is None
             else dhso.apply_guidance(guidance_step, denoised)
         )
+        if dhso.mask is not None:
+            result = BLENDING_MODES[dhso.mask_blend_mode](
+                dhso.orig_latent,
+                result,
+                dhso.mask,
+            )
+        return result

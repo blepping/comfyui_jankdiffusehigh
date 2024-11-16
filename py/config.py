@@ -5,10 +5,7 @@ from typing import Any
 from comfy.samplers import ksampler
 from pytorch_wavelets import DTCWTForward, DTCWTInverse, DWTForward, DWTInverse
 
-from .tensor_image_ops import (
-    BLENDING_MODES,
-    Sharpen,
-)
+from .tensor_image_ops import Sharpen
 from .upscale import Upscale
 from .utils import fallback
 from .vae import VAEHelper
@@ -31,6 +28,8 @@ class Config:
         "enable_cache_clearing",
         "enable_gc",
         "fadeout_factor",
+        "guidance_mask_blend_mode",
+        "guidance_mask_name",
         "guidance_factor",
         "guidance_mode",
         "guidance_restart_s_noise",
@@ -38,6 +37,8 @@ class Config:
         "guidance_sampler_name",
         "guidance_steps",
         "highres_sigmas_name",
+        "mask_blend_mode",
+        "mask_name",
         "reference_image_name",
         "reference_sampler_name",
         "reference_wavelet_multiplier",
@@ -66,7 +67,6 @@ class Config:
 
     _dict_exclude_keys = {  # noqa: RUF012
         "as_dict",
-        "blend_function",
         "dwt",
         "get_iteration_config",
         "guidance_sampler",
@@ -137,6 +137,10 @@ class Config:
         guidance_sampler_name="guidance",
         custom_noise_name="",
         restart_custom_noise_name="restart",
+        mask_name="",
+        guidance_mask_name="guidance",
+        mask_blend_mode="lerp",
+        guidance_mask_blend_mode="lerp",
     ):
         self.vae_name = vae_name
         self.upscale_model_name = upscale_model_name
@@ -147,6 +151,8 @@ class Config:
         self.sampler_name = sampler_name
         self.custom_noise_name = custom_noise_name
         self.restart_custom_noise_name = restart_custom_noise_name
+        self.mask_name = mask_name
+        self.guidance_mask_name = guidance_mask_name
 
         sampler = _params.get_item("sampler", name=sampler_name)
         guidance_sampler = _params.get_item("sampler", name=guidance_sampler_name)
@@ -157,6 +163,9 @@ class Config:
         self.highres_sigmas = (
             None if highres_sigmas is None else highres_sigmas.detach().clone()
         )
+
+        self.mask_blend_mode = mask_blend_mode
+        self.guidance_mask_blend_mode = guidance_mask_blend_mode
 
         sampler = fallback(
             sampler,
@@ -235,7 +244,6 @@ class Config:
         if blend_by_mode not in {"image", "latent", "wavelet"}:
             raise ValueError("Bad blend_by_mode: must be one of image, latent, wavelet")
         self.blend_by_mode = blend_by_mode
-        self.blend_function = BLENDING_MODES[blend_mode]
         self.enable_gc = enable_gc
         self.enable_cache_clearing = enable_cache_clearing
         self.chunked_sampling = chunked_sampling
