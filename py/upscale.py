@@ -15,13 +15,15 @@ class Upscale:
         resample_mode="bicubic",
         rescale_increment=64,
         upscale_model=None,
+        force_upscale_model=False,
     ):
         self.resample_mode = resample_mode
         self.rescale_increment = scale_dim(max(8, rescale_increment), increment=8)
         self.upscale_model = upscale_model
+        self.force_upscale_model = upscale_model is not None and force_upscale_model
 
     def __call__(self, imgbatch, scale_factor, *, pbar=None, use_upscale_model=True):
-        if scale_factor == 1.0:
+        if scale_factor == 1.0 and not self.force_upscale_model:
             return imgbatch
         _batch, height, width, _channels = imgbatch.shape
         target_height = scale_dim(
@@ -35,7 +37,10 @@ class Upscale:
             increment=self.rescale_increment,
         )
         # tqdm.write(f">> UPSCALE: {width}x{height} -> {target_width}x{target_height}")
-        if (target_height, target_width) == (height, width):
+        if (target_height, target_width) == (
+            height,
+            width,
+        ) and not self.force_upscale_model:
             return imgbatch
         if use_upscale_model and self.upscale_model is not None:
             if pbar is not None:

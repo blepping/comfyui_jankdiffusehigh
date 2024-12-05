@@ -82,6 +82,10 @@ scale_factor: 1.5
 Default advanced parameter values:
 
 ```yaml
+# Mainly useful in iteration overrides, allows skipping an iteration. When defined at
+# the toplevel it will skip everything which probably isn't what you want.
+skip: false
+
 # Mode used for blending the normal model prediction with the guidance during guidance steps.
 # Only has an effect when guidance_factor is less than 1.0
 # One of: image, latent, wavelets
@@ -165,6 +169,12 @@ sigma_dishonesty_factor_guidance: null
 # When enabled, uses an upscale model if connected. Mainly useful with
 # iteration overrides.
 use_upscale_model: true
+
+# Only has an effect if the upscale model is connected and enabled. This
+# will force it to run even if the scale factor is 1 or the size already
+# matches the scale. This is to allow use of 1x upscale models that just
+# add an effect like film grain.
+force_upscale_model: false
 
 # Allows passing extra arguments to the VAE encoder/decoder. Must be null or an object.
 # Mainly useful with tiled_diffusion where you could do something like:

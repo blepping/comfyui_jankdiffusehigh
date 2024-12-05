@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum, auto
-from typing import Sequence
+from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
@@ -9,6 +9,9 @@ import torchvision
 from PIL import Image as PILImage
 
 from .external import EXTERNAL
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 F = torch.nn.functional
 

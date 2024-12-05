@@ -32,7 +32,7 @@ class GuidedModel:
     ):
         self.dhso = dh_sampler_object
         self.allow_guidance = True
-        self.force_guidance: None | int = None
+        self.force_guidance: int | None = None
         self.set_guidance_range(guidance_sigmas, guidance_steps)
 
     def set_guidance_range(self, guidance_sigmas, guidance_steps):
@@ -45,7 +45,7 @@ class GuidedModel:
         self.guidance_sigmas_list = tuple(guidance_sigmas.detach().cpu().tolist())
         self.guidance_steps = guidance_steps
 
-    def get_guidance_step(self, sigma: torch.Tensor) -> None | int:
+    def get_guidance_step(self, sigma: torch.Tensor) -> int | None:
         sigma_float = sigma_to_float(sigma)
         if not self.allow_guidance:
             return None

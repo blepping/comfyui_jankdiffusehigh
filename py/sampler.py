@@ -29,9 +29,9 @@ class DiffuseHighSampler:
         initial_x: torch.Tensor,
         sigmas: torch.Tensor,
         *,
-        callback: None | callable,
-        extra_args: None | dict,
-        disable_pbar: None | bool,
+        callback: callable | None,
+        extra_args: dict | None,
+        disable_pbar: bool | None,
         _params,
         **kwargs: dict[str, Any],
     ):
@@ -53,8 +53,8 @@ class DiffuseHighSampler:
             _params=_params,
             **kwargs,
         )
-        self.highres_sigmas: None | torch.FloatTensor = None
-        self.reference_image: None | torch.FloatTensor = None
+        self.highres_sigmas: torch.FloatTensor | None = None
+        self.reference_image: torch.FloatTensor | None = None
         self.guidance_waves = None
         self.mask = self.guidance_mask = None
         self.seed_offset = 0
@@ -175,10 +175,10 @@ class DiffuseHighSampler:
         latent: torch.Tensor,
         sigma: float | torch.Tensor,
         *,
-        sigma_next: None | float | torch.Tensor = None,
+        sigma_next: float | torch.Tensor | None = None,
         factor=1.0,
         allow_max_denoise=True,
-        noise_sampler: None | callable = None,
+        noise_sampler: callable | None = None,
     ) -> torch.Tensor:
         self.seed_offset += 1
         sigma_next = fallback(sigma_next, sigma)
@@ -215,7 +215,7 @@ class DiffuseHighSampler:
         self,
         x: torch.Tensor,
         *,
-        sigmas: None | torch.Tensor = None,
+        sigmas: torch.Tensor | None = None,
     ) -> torch.Tensor:
         sigmas = self.highres_sigmas if sigmas is None else sigmas
         sigmas_len = len(sigmas)
@@ -340,8 +340,8 @@ class DiffuseHighSampler:
         x: torch.Tensor,
         sigmas: torch.Tensor,
         *,
-        model: None | object = None,
-        sampler: None | object = None,
+        model: object | None = None,
+        sampler: object | None = None,
         disable_pbar: bool = False,
     ):
         sampler = fallback(sampler, self.sampler)
@@ -477,6 +477,8 @@ class DiffuseHighSampler:
             desc="DiffuseHigh iteration",
         ):
             self.update_iteration_config(iteration)
+            if self.skip:
+                continue
             del x_new
             if self.highres_sigmas[-1] != 0:
                 raise ValueError(
@@ -528,6 +530,10 @@ class DiffuseHighSampler:
                 x_new,
                 disable_pbar=self.disable_pbar,
             )
+        if x_new is None:
+            raise ValueError(
+                "All iterations skipped, cannot return a result from sampler!",
+            )
         return x_new
 
 
@@ -537,9 +543,9 @@ def diffusehigh_sampler(
     sigmas: torch.Tensor,
     *,
     diffusehigh_options: dict[str, Any],
-    disable: None | bool = None,
-    extra_args: None | dict[str, Any] = None,
-    callback: None | callable = None,
+    disable: bool | None = None,
+    extra_args: dict[str, Any] | None = None,
+    callback: callable | None = None,
 ) -> torch.Tensor:
     return DiffuseHighSampler(
         model,

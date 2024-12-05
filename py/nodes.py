@@ -9,6 +9,49 @@ from .external import init_integrations
 from .sampler import diffusehigh_sampler
 from .vae import VAEMode
 
+try:
+    from comfy_execution import validation as comfy_validation
+
+    if not hasattr(comfy_validation, "validate_node_input"):
+        raise NotImplementedError  # noqa: TRY301
+    HAVE_COMFY_UNION_TYPE = comfy_validation.validate_node_input("B", "A,B")
+except (ImportError, NotImplementedError):
+    HAVE_COMFY_UNION_TYPE = False
+except Exception as exc:  # noqa: BLE001
+    HAVE_COMFY_UNION_TYPE = False
+    print(
+        f"** jankdiffusehigh: Warning, caught unexpected exception trying to detect ComfyUI union type support. Disabling. Exception: {exc}",
+    )
+
+PARAM_TYPES = frozenset((
+    "IMAGE",
+    "MASK",
+    "OCS_NOISE",
+    "SAMPLER",
+    "SIGMAS",
+    "SONAR_CUSTOM_NOISE",
+    "UPSCALE_MODEL",
+    "VAE",
+))
+
+if not HAVE_COMFY_UNION_TYPE:
+
+    class Wildcard(str):  # noqa: FURB189
+        __slots__ = ("whitelist",)
+
+        @classmethod
+        def __new__(cls, s, *args: list, whitelist=None, **kwargs: dict):
+            result = super().__new__(s, *args, **kwargs)
+            result.whitelist = whitelist
+            return result
+
+        def __ne__(self, other):
+            return False if self.whitelist is None else other not in self.whitelist
+
+    WILDCARD_PARAM = Wildcard("*", whitelist=PARAM_TYPES)
+else:
+    WILDCARD_PARAM = ",".join(PARAM_TYPES)
+
 
 class DiffuseHighSamplerNode:
     DESCRIPTION = "Jank DiffuseHigh sampler node, used for generating directly to resolutions higher than what the model was trained for. Can be connected to a SamplerCustom or other sampler node that supports a SAMPLER input."
@@ -152,8 +195,8 @@ class DiffuseHighSamplerNode:
     def go(
         cls,
         *,
-        input_params_opt: None | ParamGroup = None,
-        yaml_parameters: None | str = None,
+        input_params_opt: ParamGroup | None = None,
+        yaml_parameters: str | None = None,
         **kwargs: dict,
     ) -> tuple[KSAMPLER]:
         init_integrations()
@@ -205,19 +248,6 @@ class DiffuseHighSamplerNode:
         )
 
 
-class Wildcard(str):  # noqa: FURB189
-    __slots__ = ("whitelist",)
-
-    @classmethod
-    def __new__(cls, s, *args: list, whitelist=None, **kwargs: dict):
-        result = super().__new__(s, *args, **kwargs)
-        result.whitelist = whitelist
-        return result
-
-    def __ne__(self, other):
-        return False if self.whitelist is None else other not in self.whitelist
-
-
 class DiffuseHighParamNode:
     RETURN_TYPES = ("DIFFUSEHIGH_PARAMS",)
     CATEGORY = "sampling/custom_sampling/JankDiffuseHigh"
@@ -227,20 +257,6 @@ class DiffuseHighParamNode:
     )
 
     FUNCTION = "go"
-
-    WC = Wildcard(
-        "*",
-        whitelist={
-            "IMAGE",
-            "MASK",
-            "OCS_NOISE",
-            "SAMPLER",
-            "SIGMAS",
-            "SONAR_CUSTOM_NOISE",
-            "UPSCALE_MODEL",
-            "VAE",
-        },
-    )
 
     PARAM_TYPES = {  # noqa: RUF012
         "vae": lambda _v: True,
@@ -263,9 +279,9 @@ class DiffuseHighParamNode:
                     },
                 ),
                 "value": (
-                    cls.WC,
+                    WILDCARD_PARAM,
                     {
-                        "tooltip": "Connect the type of value expected by the key. Allows connecting output from any type of node HOWEVER if it is the wrong type expected by the key you will get an error when you run the workflow.",
+                        "tooltip": f"Connect the type of value expected by the key. Allows connecting output from any type of node HOWEVER if it is the wrong type expected by the key you will get an error when you run the workflow.\nThe following input types are supported: {', '.join(PARAM_TYPES)}",
                     },
                 ),
             },

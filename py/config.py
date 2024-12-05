@@ -28,6 +28,7 @@ class Config:
         "enable_cache_clearing",
         "enable_gc",
         "fadeout_factor",
+        "force_upscale_model",
         "guidance_mask_blend_mode",
         "guidance_mask_name",
         "guidance_factor",
@@ -56,6 +57,7 @@ class Config:
         "sharpen_strength",
         "sigma_dishonesty_factor_guidance",
         "sigma_dishonesty_factor",
+        "skip",
         "skip_callback",
         "upscale_model_name",
         "use_upscale_model",
@@ -101,6 +103,7 @@ class Config:
         enable_gc=True,
         enable_cache_clearing=True,
         fadeout_factor=0.0,
+        force_upscale_model=False,
         guidance_factor=1.0,
         guidance_mode="image",
         guidance_restart_s_noise=1.0,
@@ -122,7 +125,7 @@ class Config:
         sharpen_reference=True,
         sharpen_strength=1.0,
         skip_callback=False,
-        sigma_dishonesty_factor_guidance: None | float = None,
+        sigma_dishonesty_factor_guidance: float | None = None,
         sigma_dishonesty_factor=0.0,
         use_upscale_model=True,
         vae_decode_kwargs=None,
@@ -141,7 +144,10 @@ class Config:
         guidance_mask_name="guidance",
         mask_blend_mode="lerp",
         guidance_mask_blend_mode="lerp",
+        skip=False,
     ):
+        self.skip = skip
+
         self.vae_name = vae_name
         self.upscale_model_name = upscale_model_name
         self.highres_sigmas_name = highres_sigmas_name
@@ -211,6 +217,7 @@ class Config:
             resample_mode=resample_mode,
             rescale_increment=rescale_increment,
             upscale_model=upscale_model,
+            force_upscale_model=force_upscale_model,
         )
         if schedule_override is not None and not isinstance(schedule_override, dict):
             raise TypeError("Bad type for schedule_override: must be null or object")
@@ -285,6 +292,7 @@ class Config:
         result["sharpen_gaussian_sigma"] = self.sharpen.gaussian_sigma
         result["resample_mode"] = self.upscale.resample_mode
         result["rescale_increment"] = self.upscale.rescale_increment
+        result["force_upscale_model"] = self.upscale.force_upscale_model
         return result
 
     def get_iteration_config(self, iteration):
@@ -319,9 +327,9 @@ class ParamGroup:
         self,
         type_name: str,
         *,
-        name: None | str = "",
+        name: str | None = "",
         param_mode: bool = False,
-        default: None | Any = None,  # noqa: ANN401
+        default: Any | None = None,  # noqa: ANN401
     ) -> Any:  # noqa: ANN401
         name = name if name is not None else ""
         key = (type_name, name) if not param_mode else (type_name, name, "params")
