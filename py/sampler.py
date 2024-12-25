@@ -425,7 +425,7 @@ class DiffuseHighSampler:
         self.seed_offset += 1
         return custom_noise.make_noise_sampler(
             x,
-            sigmas.min(),
+            sigmas[sigmas > 0].min(),
             sigmas.max(),
             **custom_noise_params,
         )

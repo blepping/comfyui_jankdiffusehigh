@@ -8,7 +8,7 @@ from comfy.model_management import device_supports_non_blocking
 from comfy.taesd import taesd
 from tqdm import tqdm
 
-from .external import EXTERNAL
+from .external import MODULES as EXT
 from .utils import fallback
 
 if TYPE_CHECKING:
@@ -17,9 +17,12 @@ if TYPE_CHECKING:
 tiled_diffusion = None
 
 
-def init_integrations():
+def init_integrations(integrations):
     global tiled_diffusion  # noqa: PLW0603
-    tiled_diffusion = EXTERNAL.get("tiled_diffusion")
+    tiled_diffusion = integrations.tiled_diffusion
+
+
+EXT.register_init_handler(init_integrations)
 
 
 class VAEMode(Enum):

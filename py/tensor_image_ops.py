@@ -8,7 +8,7 @@ import torch
 import torchvision
 from PIL import Image as PILImage
 
-from .external import EXTERNAL
+from .external import MODULES as EXT
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -20,12 +20,15 @@ BLENDING_MODES = {
 }
 
 
-def init_integrations():
+def init_integrations(integrations):
     global BLENDING_MODES  # noqa: PLW0603
-    ext_bleh = EXTERNAL.get("bleh")
+    ext_bleh = integrations.bleh
     if ext_bleh is not None:
         BLENDING_MODES.clear()
         BLENDING_MODES |= ext_bleh.latent_utils.BLENDING_MODES
+
+
+EXT.register_init_handler(init_integrations)
 
 
 class SharpenMode(Enum):

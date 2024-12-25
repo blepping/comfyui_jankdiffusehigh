@@ -5,7 +5,7 @@ import yaml
 from comfy.samplers import KSAMPLER
 
 from .config import ParamGroup
-from .external import init_integrations
+from .external import IntegratedNode
 from .sampler import diffusehigh_sampler
 from .vae import VAEMode
 
@@ -53,7 +53,7 @@ else:
     WILDCARD_PARAM = ",".join(PARAM_TYPES)
 
 
-class DiffuseHighSamplerNode:
+class DiffuseHighSamplerNode(metaclass=IntegratedNode):
     DESCRIPTION = "Jank DiffuseHigh sampler node, used for generating directly to resolutions higher than what the model was trained for. Can be connected to a SamplerCustom or other sampler node that supports a SAMPLER input."
     OUTPUT_TOOLTIPS = (
         "SAMPLER that can be connected to a SamplerCustom or other sampler node that supports a SAMPLER input.",
@@ -199,7 +199,6 @@ class DiffuseHighSamplerNode:
         yaml_parameters: str | None = None,
         **kwargs: dict,
     ) -> tuple[KSAMPLER]:
-        init_integrations()
         if yaml_parameters:
             extra_params = yaml.safe_load(yaml_parameters)
             if extra_params is None:
@@ -248,7 +247,7 @@ class DiffuseHighSamplerNode:
         )
 
 
-class DiffuseHighParamNode:
+class DiffuseHighParamNode(metaclass=IntegratedNode):
     RETURN_TYPES = ("DIFFUSEHIGH_PARAMS",)
     CATEGORY = "sampling/custom_sampling/JankDiffuseHigh"
     DESCRIPTION = "Jank DiffuseHigh parameter definition node. Used to set parameters like custom noise types that require an input."

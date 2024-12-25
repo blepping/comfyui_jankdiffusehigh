@@ -56,12 +56,12 @@ class Schedule:
         self.total_steps = int(steps / denoise)
         self.schedule_name = schedule_name
         self.schedule_kwargs = self.get_schedule_kwargs(schedule_name, kwargs)
-        self._sigmas: None | torch.Tensor = None
+        self._sigmas: torch.Tensor | None = None
 
     def get_schedule_kwargs(
         self,
         schedule_name: str,
-        schedule_kwargs: None | dict[str, Any] = None,
+        schedule_kwargs: dict[str, Any] | None = None,
     ) -> dict[str, int | float | str]:
         schedule_default_kwargs = self.schedule_default_kwargs.get(
             schedule_name.lower(),
@@ -166,6 +166,11 @@ class Schedule:
             f=kds.get_sigmas_vp,
         ),
     }
+    if hasattr(samplers, "kl_optimal_scheduler"):
+        _make_sigmas_handlers["kl_optimal"] = partial(
+            make_sigmas_no_model_sampling,
+            f=samplers.kl_optimal_scheduler,
+        )
 
     def make_sigmas(self) -> torch.Tensor:
         handler = self._make_sigmas_handlers.get(self.schedule_name)
