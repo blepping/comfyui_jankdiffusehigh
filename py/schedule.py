@@ -28,6 +28,7 @@ class Schedule:
         "sgm_uniform": {},
         "simple": {},
         "vp": {"beta_d": 19.9, "beta_min": 0.1, "eps_s": 0.001},
+        "kl_optimal": {"sigma_min": -1, "sigma_max": -1},
     }
 
     def __init__(
@@ -63,12 +64,11 @@ class Schedule:
         schedule_name: str,
         schedule_kwargs: dict[str, Any] | None = None,
     ) -> dict[str, int | float | str]:
-        schedule_default_kwargs = self.schedule_default_kwargs.get(
-            schedule_name.lower(),
-        )
-        if schedule_default_kwargs is None:
+        schedule_name = schedule_name.lower().strip()
+        if schedule_name not in self._make_sigmas_handlers:
             errstr = f"Unknown schedule: {schedule_name}"
             raise ValueError(errstr)
+        schedule_default_kwargs = self.schedule_default_kwargs.get(schedule_name, {})
         schedule_kwargs = fallback(schedule_kwargs, {})
         bad_keys = ",".join({
             k for k in schedule_kwargs if k not in schedule_default_kwargs
