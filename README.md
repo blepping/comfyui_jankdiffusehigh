@@ -7,13 +7,13 @@ This is a best-effort attempt at implementation. If you experience poor results,
 
 ## Current Status
 
-Beta - lightly tested but the main features are in place. Mainly targeted at advanced users who can deal with some weird stuff and frequent workflow-breaking changes.
+Pretty stable at this point, or at least as stable as my projects get. Workflow-breaking changes should be rare.
 
 See the [changelog](changelog.md) for recent user visible changes.
 
 **Known issues/caveats**
 
-* There will be frequent workflow-breaking changes for a while yet.
+* Documentation is a bit sparse and I still need to add examples.
 * Progress and previews are pretty wonky (you can look at the log for some progress information).
 * Using VAE or upscale models may result in the main model getting repeatedly unloaded/reloaded. Try using `latent` as the `guidance_mode`. If you actually have enough VRAM, maybe disabling smart memory (via ComfyUI commandline parameter) would help.
 * Brownian noise-based (AKA SDE) samplers may be a bit weird here, there is a workaround in place but it might not be enough. Also don't use with prompt-control's PCSplitSampling stuff.
