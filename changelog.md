@@ -2,6 +2,12 @@
 
 Note, only relatively significant changes to user-visible functionality will be included here. Most recent changes at the top.
 
+## 20250109
+
+* Fixed an issue where sharpen didn't respect the mask if it existed.
+* Added `ensure_model_mode` YAML parameter. Can be used to control the strategy jankdiffushigh uses to make sure the model doesn't get unloaded.
+* You can now pass noise sampler parameters via `custom_noise_params`.
+
 ## 20241224
 
 Reworked approach to integrating with external node packs. This _shouldn't_ cause any visible changes from a user perspective but please create an issue if you notice anything weird.

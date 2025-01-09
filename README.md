@@ -117,6 +117,12 @@ enable_gc: true
 # It's same to enable this on non-Nvidia GPUs, it just won't do anything.
 enable_cache_clearing: true
 
+# Ensures the model is loaded in memory. May be set to one of the following:
+#   null (value, not string), disable, normal, normal_unload, lowvram, novram
+# If you find you are running out of memory on large models like Flux, try setting it to
+# lowvram or novram.
+ensure_model_mode: normal
+
 # Number of times to restart guidance steps. (Does a restart back like restart sampling.)
 guidance_restart: 0
 # Factor for noise added during guidance restarts.
@@ -163,6 +169,7 @@ skip_callback: false
 # Telling the model there's less noise than there actually is can increase detail
 # (and conversely telling it there's more will reduce detail/smooth things out).
 # A little goes a long way. Start with something like -0.03 to increase detail.
+# Concept from: https://github.com/muerrilla/sd-webui-detail-daemon
 sigma_dishonesty_factor: 0.0
 sigma_dishonesty_factor_guidance: null
 
@@ -197,6 +204,10 @@ custom_noise_name: ""
 restart_custom_noise_name: "restart"
 mask_name: ""
 guidance_mask_name: "guidance"
+
+# May be null or a YAML object. Allows passing parameters to custom noise samplers.
+# See custom_noise_name and restart_custom_noise_name above.
+custom_noise_params: null
 
 # Either null or an object.
 # Allows overriding the sigma used for highres steps. See description below.
@@ -296,6 +307,9 @@ I tried to set the node defaults to align with the official implementation. Thes
 * Setting `sigma_dishonesty_factor` and/or `sigma_dishonesty_factor_guidance` to a low negative value can be used to increase detail even for non-ancestral samplers (similar effect to increasing `s_noise`). See the YAML parameters section of this README.
 * Using an upscale model or `image` guidance seems to make the most difference when you're going from low to mid-resolution (i.e. 512x512 to 1024x1024) so it may make sense to use the relatively slow `image` guidance and an upscale model for the first iteration and then switch to `latent` guidance and set `use_upscale_model: false` for subsequent iterations.
 * It's possible to switch VAEs, upscale models and samplers between iterations using named `DiffuseHigh Param` inputs and a YAML parameter like `vae_name: whatever`.
+* If you are running out of memory with DiffuseHigh at high resolutions but a normal img2img at that resolution works, try setting `ensure_model_mode: novram` (or `lowvram`) in the YAML parameters.
+
+
 ***
 
 ## Integration

@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import torch
 import torchvision
+from comfy.utils import reshape_mask
 from PIL import Image as PILImage
 
 from .external import MODULES as EXT

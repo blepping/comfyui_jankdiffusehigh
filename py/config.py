@@ -17,6 +17,7 @@ class Config:
         "blend_mode",
         "chunked_sampling",
         "custom_noise_name",
+        "custom_noise_params",
         "denoised_wavelet_multiplier",
         "dtcwt_biort",
         "dtcwt_mode",
@@ -89,9 +90,11 @@ class Config:
         latent_format,
         *,
         _params,
-        blend_mode="lerp",
         blend_by_mode="image",
+        blend_mode="lerp",
         chunked_sampling=True,
+        custom_noise_name="",
+        custom_noise_params=None,
         denoised_wavelet_multiplier=1.0,
         dtcwt_biort="near_sym_a",
         dtcwt_mode=False,
@@ -100,53 +103,65 @@ class Config:
         dwt_level=1,
         dwt_mode="symmetric",
         dwt_wave="db4",
-        enable_gc=True,
         enable_cache_clearing=True,
+        enable_gc=True,
         fadeout_factor=0.0,
         force_upscale_model=False,
         guidance_factor=1.0,
+        guidance_mask_blend_mode="lerp",
+        guidance_mask_name="guidance",
         guidance_mode="image",
         guidance_restart_s_noise=1.0,
         guidance_restart=0,
+        guidance_sampler_name="guidance",
         guidance_steps=5,
+        highres_sigmas_name="highres",
         iteration_override=None,
         iterations=1,
+        mask_blend_mode="lerp",
+        mask_name="",
+        reference_image_name="reference",
+        reference_sampler_name="reference",
         reference_wavelet_multiplier=1.0,
         renoise_factor=1.0,
         resample_mode="bicubic",
         rescale_increment=64,
+        restart_custom_noise_name="restart",
+        sampler_name="",
         scale_factor=2.0,
         schedule_override=None,
-        seed_rng=True,
         seed_rng_offset=1,
+        seed_rng=True,
         sharpen_gaussian_kernel_size=3,
         sharpen_gaussian_sigma=(0.1, 2.0),
         sharpen_mode="gaussian",
         sharpen_reference=True,
         sharpen_strength=1.0,
-        skip_callback=False,
         sigma_dishonesty_factor_guidance: float | None = None,
         sigma_dishonesty_factor=0.0,
+        skip_callback=False,
+        skip=False,
+        upscale_model_name="",
         use_upscale_model=True,
         vae_decode_kwargs=None,
         vae_encode_kwargs=None,
         vae_mode="normal",
         vae_name="",
-        upscale_model_name="",
-        highres_sigmas_name="highres",
-        reference_image_name="reference",
-        sampler_name="",
-        reference_sampler_name="reference",
-        guidance_sampler_name="guidance",
-        custom_noise_name="",
-        restart_custom_noise_name="restart",
-        mask_name="",
-        guidance_mask_name="guidance",
-        mask_blend_mode="lerp",
-        guidance_mask_blend_mode="lerp",
-        skip=False,
+        ensure_model_mode: str | None = True,
     ):
         self.skip = skip
+        if ensure_model_mode not in {
+            None,
+            "disable",
+            "normal",
+            "normal_unload",
+            "lowvram",
+            "novram",
+        }:
+            raise ValueError(
+                "Bad ensure_model_mode - must null or one of disable, normal, normal_unload, lowvram, novram",
+            )
+        self.ensure_model_mode = ensure_model_mode
 
         self.vae_name = vae_name
         self.upscale_model_name = upscale_model_name
@@ -156,6 +171,9 @@ class Config:
         self.guidance_sampler_name = guidance_sampler_name
         self.sampler_name = sampler_name
         self.custom_noise_name = custom_noise_name
+        self.custom_noise_params = (
+            {} if not isinstance(custom_noise_params, dict) else custom_noise_params
+        )
         self.restart_custom_noise_name = restart_custom_noise_name
         self.mask_name = mask_name
         self.guidance_mask_name = guidance_mask_name

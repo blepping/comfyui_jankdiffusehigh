@@ -6,7 +6,7 @@ import sys
 from typing import Any
 
 import torch
-from comfy.model_management import device_supports_non_blocking
+from comfy import model_management
 from comfy.utils import reshape_mask
 from tqdm import tqdm
 from tqdm.auto import trange
@@ -35,7 +35,9 @@ class DiffuseHighSampler:
         _params,
         **kwargs: dict[str, Any],
     ):
-        self.non_blocking = device_supports_non_blocking(initial_x.device)
+        self.non_blocking = model_management.device_supports_non_blocking(
+            initial_x.device,
+        )
         self.s_in = initial_x.new_ones((initial_x.shape[0],))
         self.initial_x = initial_x
         self.callback = callback
@@ -388,19 +390,32 @@ class DiffuseHighSampler:
                 name=self.cfg.reference_image_name,
             )
 
+    def get_mask(
+        self,
+        *,
+        name=str | None,
+        copy: bool = True,
+        reshape_reference: torch.Tensor | None = None,
+    ) -> torch.Tensor | None:
+        mask = self._params.get_item("mask", name=name if name is not None else "")
+        if mask is None:
+            return None
+        if copy or reshape_reference is not None:
+            mask = mask.detach().clone()
+        if reshape_reference is None:
+            return mask
+        mask = mask.to(reshape_reference, non_blocking=self.non_blocking)
+        return reshape_mask(mask, reshape_reference.shape)
+
     def update_masks(self, latent):
         self.curr_mask = self.guidance_mask = None
         for name, is_guidance in (
             (self.mask_name, False),
             (self.guidance_mask_name, True),
         ):
-            mask = self._params.get_item("mask", name=name)
+            mask = self.get_mask(name=name, copy=True, reshape_reference=latent)
             if mask is None:
                 continue
-            mask = reshape_mask(mask.detach().clone(), latent.shape).to(
-                latent,
-                non_blocking=self.non_blocking,
-            )
             if is_guidance:
                 self.guidance_mask = mask
             else:
@@ -417,11 +432,16 @@ class DiffuseHighSampler:
             param_mode=True,
             default={},
         )
-        custom_noise_params = {
-            "normalized": True,
-            "seed": self.seed + self.seed_offset,
-            "cpu": True,
-        } | custom_noise_params
+        if custom_noise_params:
+            custom_noise_params = (
+                {
+                    "normalized": True,
+                    "seed": self.seed + self.seed_offset,
+                    "cpu": True,
+                }
+                | self.custom_noise_params
+                | custom_noise_params
+            )
         self.seed_offset += 1
         return custom_noise.make_noise_sampler(
             x,
@@ -494,6 +514,14 @@ class DiffuseHighSampler:
                 )
                 pbar.update()
             self.reference_image = self.sharpen(img_hr, fix_dims=True)
+            img_mask = self.get_mask(name=self.mask_name, reshape_reference=img_hr)
+            if img_mask is not None:
+                self.reference_image = BLENDING_MODES[self.mask_blend_mode](
+                    img_hr,
+                    self.reference_image,
+                    img_mask,
+                )
+                del img_mask
             x_new = self.vae.encode(
                 self.reference_image,
                 disable_pbar=self.disable_pbar,

@@ -86,8 +86,9 @@ class GuidedModel:
         dhso = self.dhso
         model = dhso.model
         dhso.seed_offset += 1
-        ensure_model(model)
+        ensure_model(model, mode=dhso.ensure_model_mode)
         guidance_step = self.get_guidance_step(sigma)
+        # Sigma offset trick from https://github.com/muerrilla/sd-webui-detail-daemon
         sigma_offset = max(
             1e-05,
             1.0
