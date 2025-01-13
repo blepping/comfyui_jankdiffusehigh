@@ -147,7 +147,7 @@ class Config:
         vae_encode_kwargs=None,
         vae_mode="normal",
         vae_name="",
-        ensure_model_mode: str | None = True,
+        ensure_model_mode: str | None = "normal",
     ):
         self.skip = skip
         if ensure_model_mode not in {
