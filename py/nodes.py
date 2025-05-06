@@ -104,6 +104,9 @@ class DiffuseHighSamplerNode(metaclass=IntegratedNode):
                     "FLOAT",
                     {
                         "default": 2.0,
+                        "step": 0.01,
+                        "min": 0.01,
+                        "max": 1000.0,
                         "tooltip": "Upscale factor per iteration.",
                     },
                 ),
@@ -111,6 +114,8 @@ class DiffuseHighSamplerNode(metaclass=IntegratedNode):
                     "FLOAT",
                     {
                         "default": 1.0,
+                        "min": -1000.0,
+                        "max": 1000.0,
                         "tooltip": "Strength of noise added at the start of each iteration. The default of 1.0 (100%) is the normal amount, but you can increase this slightly to add more detail.",
                     },
                 ),
@@ -182,10 +187,9 @@ class DiffuseHighSamplerNode(metaclass=IntegratedNode):
                 "yaml_parameters": (
                     "STRING",
                     {
-                        "tooltip": "Allows specifying custom parameters via YAML. You can also override any of the normal parameters by key. This input can be converted into a multiline text widget. Note: When specifying paramaters this way, there is very little error checking.",
+                        "tooltip": "Allows specifying custom parameters via YAML. You can also override any of the normal parameters by key. Note: When specifying paramaters this way, there is very little error checking.",
                         "dynamicPrompts": False,
                         "multiline": True,
-                        "defaultInput": True,
                     },
                 ),
             },
@@ -301,10 +305,9 @@ class DiffuseHighParamNode(metaclass=IntegratedNode):
                 "yaml_parameters": (
                     "STRING",
                     {
-                        "tooltip": "Allows specifying custom parameters for an input via YAML. This input can be converted into a multiline text widget. Note: When specifying paramaters this way, there is very little error checking.",
+                        "tooltip": "Allows specifying custom parameters for an input via YAML. Note: When specifying paramaters this way, there is very little error checking.",
                         "dynamicPrompts": False,
                         "multiline": True,
-                        "defaultInput": True,
                     },
                 ),
             },
